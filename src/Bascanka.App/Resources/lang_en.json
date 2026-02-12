@@ -1,0 +1,173 @@
+{
+  "languageName": "English",
+  "languageCode": "en",
+  "strings": {
+    "AppTitle": "Bascanka",
+    "UntitledDocument": "Untitled {0}",
+    "PlainText": "Plain Text",
+
+    "MenuFile": "&File",
+    "MenuNew": "&New",
+    "MenuOpen": "&Open...",
+    "MenuOpenRecent": "Open &Recent",
+    "MenuSave": "&Save",
+    "MenuSaveAs": "Save &As...",
+    "MenuSaveAll": "Save A&ll",
+    "MenuPrint": "&Print...",
+    "MenuPrintPreview": "Print Pre&view...",
+    "MenuExit": "E&xit",
+
+    "MenuEdit": "&Edit",
+    "MenuUndo": "&Undo",
+    "MenuRedo": "&Redo",
+    "MenuCut": "Cu&t",
+    "MenuCopy": "&Copy",
+    "MenuPaste": "&Paste",
+    "MenuDelete": "&Delete",
+    "MenuSelectAll": "Select &All",
+    "MenuFind": "&Find...",
+    "MenuReplace": "R&eplace...",
+    "MenuFindInFiles": "Find in F&iles...",
+    "MenuGoToLine": "&Go to Line...",
+
+    "MenuText": "Te&xt",
+    "MenuCaseConversion": "&Case Conversion",
+    "MenuUpperCase": "&UPPERCASE",
+    "MenuLowerCase": "&lowercase",
+    "MenuTitleCase": "&Title Case",
+    "MenuSwapCase": "&sWAP cASE",
+    "MenuTextEncoding": "&Encode / Decode",
+    "MenuBase64Encode": "Encode &Base64",
+    "MenuBase64Decode": "Decode B&ase64",
+    "MenuUrlEncode": "Encode &URL",
+    "MenuUrlDecode": "Decode U&RL",
+    "MenuHtmlEncode": "Encode &HTML",
+    "MenuHtmlDecode": "Decode HT&ML",
+    "MenuSortLinesAsc": "Sort Lines (&A-Z)",
+    "MenuSortLinesDesc": "Sort Lines (&Z-A)",
+    "MenuRemoveDuplicateLines": "Remove &Duplicate Lines",
+    "MenuReverseLines": "Re&verse Lines",
+    "MenuTrimTrailingWhitespace": "Trim &Trailing Whitespace",
+    "MenuTrimLeadingWhitespace": "Trim &Leading Whitespace",
+    "MenuCompactWhitespace": "Compact &Whitespace",
+    "MenuTabsToSpaces": "Tabs to S&paces",
+    "MenuSpacesToTabs": "Spaces to Ta&bs",
+    "MenuReverseText": "Reverse Te&xt",
+
+    "MenuView": "&View",
+    "MenuTheme": "&Theme",
+    "MenuLanguage": "&Language",
+    "MenuUILanguage": "&UI Language",
+    "MenuWordWrap": "&Word Wrap",
+    "MenuShowWhitespace": "Show &Whitespace",
+    "MenuLineNumbers": "Line &Numbers",
+    "MenuZoomIn": "Zoom &In",
+    "MenuZoomOut": "Zoom &Out",
+    "MenuResetZoom": "&Reset Zoom",
+    "MenuFullScreen": "&Full Screen",
+    "MenuSymbolList": "&Symbol List",
+    "MenuFindResults": "Find &Results",
+
+    "MenuEncoding": "E&ncoding",
+    "MenuConvertLineEndings": "Convert &Line Endings",
+
+    "MenuTools": "&Tools",
+    "MenuHexEditor": "&Hex Editor",
+    "MenuRecordMacro": "&Record Macro",
+    "MenuStopRecording": "&Stop Recording",
+    "MenuPlayMacro": "&Play Macro",
+    "MenuMacroManager": "&Macro Manager...",
+    "MenuSettings": "S&ettings...",
+
+    "MenuPlugins": "Pl&ugins",
+    "MenuPluginManager": "&Plugin Manager...",
+
+    "MenuHelp": "&Help",
+    "MenuAbout": "&About Bascanka",
+
+    "StatusPosition": "Ln: 1, Col: 1",
+    "StatusPositionFormat": "Ln: {0}, Col: {1}",
+    "StatusSelectionFormat": "Sel: {0}",
+
+    "PromptSaveChanges": "Do you want to save changes to \"{0}\"?",
+    "ButtonOK": "OK",
+    "ButtonCancel": "Cancel",
+    "ButtonYes": "Yes",
+    "ButtonNo": "No",
+
+    "NoRecentFiles": "(No recent files)",
+    "ClearRecentFiles": "Clear Recent Files",
+
+    "FilterAllFiles": "All Files",
+
+    "ErrorFileNotFound": "File not found: {0}",
+    "ErrorOpeningFile": "Error opening file \"{0}\": {1}",
+    "ErrorSavingFile": "Error saving file \"{0}\": {1}",
+    "ErrorNoDocumentOpen": "No document is currently open.",
+    "ErrorUnhandledException": "An unexpected error has occurred: {0}\n\nDetails:\n{1}",
+    "ErrorCompilingScript": "Failed to compile script plugin.",
+
+    "FileModifiedExternally": "The file \"{0}\" has been modified externally. Do you want to reload it?\n\nYes = Reload, No = Ignore, Cancel = Ignore All",
+    "FileDeletedExternally": "The file \"{0}\" has been deleted or moved externally.",
+
+    "HexEditorRequiresFile": "The Hex Editor requires the document to be saved to a file first.",
+
+    "CommandPaletteNotYetImplemented": "Command Palette will be available in a future version.",
+
+    "AboutText": "Bascanka Text Editor\nVersion 1.0.0\n\nA full-featured text editor for Windows with syntax highlighting, plugin support, and multi-document editing.\n\nBuilt with .NET and Windows Forms.",
+
+    "SessionRestoreError": "Failed to restore the previous session.",
+
+    "SearchNotFound": "No matches found for \"{0}\".",
+    "SearchReplacedCount": "Replaced {0} occurrence(s).",
+    "SearchWrappedAround": "Search wrapped around to the beginning of the document.",
+
+    "PrintJobName": "Bascanka - {0}",
+
+    "ZoomLevelFormat": "Zoom: {0}%",
+
+    "EncodingChanged": "Encoding changed to {0}.",
+
+    "LineEndingChanged": "Line endings converted to {0}.",
+
+    "SettingsTitle": "Settings",
+    "SettingsExplorerContextMenu": "Register \"Edit with Bascanka\" in Windows Explorer context menu",
+    "SettingsExplorerContextMenuDesc": "Adds a right-click option to open files with Bascanka in Windows Explorer.",
+
+    "TabMenuClose": "Close",
+    "TabMenuCloseOthers": "Close Others",
+    "TabMenuCloseAll": "Close All",
+    "TabMenuCloseToRight": "Close to the Right",
+    "TabMenuCopyPath": "Copy Path",
+    "TabMenuOpenInExplorer": "Open Path in Explorer",
+
+    "FindResultsCopyLine": "Copy Line",
+    "FindResultsCopyAll": "Copy All Results",
+    "FindResultsCopyPath": "Copy Path",
+    "FindResultsOpenInNewTab": "Open Results in New Tab",
+    "FindResultsRemoveSearch": "Remove Search",
+    "FindResultsClearAll": "Clear All",
+    "FindResultsHeader": "Find Results",
+    "FindResultsHeaderFormat": "Find Results ({0} search{1})",
+
+    "ScopeCurrentDocument": "current document",
+    "ScopeAllOpenTabs": "all open tabs",
+    "FindResultMatchFormat": "\"{0}\" \u2014 {1} match{2}  ({3})  [x]",
+    "FindResultMatchFilesFormat": "\"{0}\" \u2014 {1} match{2} in {3} file{4}  ({5})  [x]",
+
+    "CtxUndo": "Undo",
+    "CtxRedo": "Redo",
+    "CtxCut": "Cut",
+    "CtxCopy": "Copy",
+    "CtxPaste": "Paste",
+    "CtxDelete": "Delete",
+    "CtxSelectAll": "Select All",
+    "CtxSelectedText": "Selected Text",
+
+    "FindPanelMarkAll": "Mark All",
+    "FindPanelFindAll": "Find All",
+    "FindPanelFindInTabs": "Find in Tabs",
+    "FindPanelReplace": "Replace",
+    "FindPanelReplaceAll": "All"
+  }
+}

@@ -1,0 +1,121 @@
+using System.Runtime.InteropServices;
+
+namespace Bascanka.App;
+
+static class Program
+{
+    /// <summary>
+    /// Gets whether the Plugins menu should be shown.
+    /// Enabled by passing <c>--plugins</c> on the command line.
+    /// </summary>
+    public static bool EnablePlugins { get; private set; }
+
+    [STAThread]
+    static void Main(string[] args)
+    {
+        // Enable high DPI support and visual styles.
+        ApplicationConfiguration.Initialize();
+
+        // Enable per-monitor DPI awareness via Win32 API as a fallback.
+        SetProcessDpiAwareness();
+
+        // Set unhandled exception handlers.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += OnThreadException;
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+
+        // Initialize localization (must be before any UI string access).
+        LocalizationManager.Initialize();
+
+        // Parse command-line arguments: each argument is treated as a file path to open.
+        string[] filesToOpen = ParseCommandLineArgs(args);
+
+        // Single-instance: if files were passed and an existing instance is running,
+        // send the files to it and exit. No-args launches always start a new instance.
+        if (filesToOpen.Length > 0 && SingleInstanceManager.TrySendFiles(filesToOpen))
+            return;
+
+        // Create and run the main form.
+        var singleInstance = new SingleInstanceManager();
+        using var mainForm = new MainForm(filesToOpen, singleInstance);
+        Application.Run(mainForm);
+    }
+
+    /// <summary>
+    /// Parses command-line arguments, extracting file paths to open.
+    /// Skips arguments that start with '-' (treated as flags).
+    /// </summary>
+    private static string[] ParseCommandLineArgs(string[] args)
+    {
+        var files = new List<string>();
+        foreach (string arg in args)
+        {
+            if (string.Equals(arg, "--plugins", StringComparison.OrdinalIgnoreCase))
+            {
+                EnablePlugins = true;
+                continue;
+            }
+
+            if (arg.StartsWith('-'))
+                continue;
+
+            // Resolve to absolute path if relative.
+            string fullPath = Path.GetFullPath(arg);
+            files.Add(fullPath);
+        }
+        return files.ToArray();
+    }
+
+    private static void OnThreadException(object sender, ThreadExceptionEventArgs e)
+    {
+        string message = string.Format(
+            Strings.ErrorUnhandledException,
+            e.Exception.Message,
+            e.Exception.StackTrace);
+
+        MessageBox.Show(
+            message,
+            Strings.AppTitle,
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
+    }
+
+    private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception ex)
+        {
+            string message = string.Format(
+                Strings.ErrorUnhandledException,
+                ex.Message,
+                ex.StackTrace);
+
+            MessageBox.Show(
+                message,
+                Strings.AppTitle,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>
+    /// Sets process DPI awareness to Per-Monitor V2 on Windows 10+.
+    /// </summary>
+    private static void SetProcessDpiAwareness()
+    {
+        try
+        {
+            // Windows 10 1703+ (Creators Update): Per-Monitor V2
+            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+        catch
+        {
+            // Fallback: the app.manifest handles this for older scenarios.
+        }
+    }
+
+    private static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new(-4);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+}

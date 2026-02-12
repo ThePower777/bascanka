@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+
+  <!-- Application -->
+  <data name="AppTitle" xml:space="preserve">
+    <value>Bascanka</value>
+  </data>
+  <data name="UntitledDocument" xml:space="preserve">
+    <value>Untitled {0}</value>
+  </data>
+  <data name="PlainText" xml:space="preserve">
+    <value>Plain Text</value>
+  </data>
+
+  <!-- File Menu -->
+  <data name="MenuFile" xml:space="preserve">
+    <value>&amp;File</value>
+  </data>
+  <data name="MenuNew" xml:space="preserve">
+    <value>&amp;New</value>
+  </data>
+  <data name="MenuOpen" xml:space="preserve">
+    <value>&amp;Open...</value>
+  </data>
+  <data name="MenuOpenRecent" xml:space="preserve">
+    <value>Open &amp;Recent</value>
+  </data>
+  <data name="MenuSave" xml:space="preserve">
+    <value>&amp;Save</value>
+  </data>
+  <data name="MenuSaveAs" xml:space="preserve">
+    <value>Save &amp;As...</value>
+  </data>
+  <data name="MenuSaveAll" xml:space="preserve">
+    <value>Save A&amp;ll</value>
+  </data>
+  <data name="MenuPrint" xml:space="preserve">
+    <value>&amp;Print...</value>
+  </data>
+  <data name="MenuPrintPreview" xml:space="preserve">
+    <value>Print Pre&amp;view...</value>
+  </data>
+  <data name="MenuExit" xml:space="preserve">
+    <value>E&amp;xit</value>
+  </data>
+
+  <!-- Edit Menu -->
+  <data name="MenuEdit" xml:space="preserve">
+    <value>&amp;Edit</value>
+  </data>
+  <data name="MenuUndo" xml:space="preserve">
+    <value>&amp;Undo</value>
+  </data>
+  <data name="MenuRedo" xml:space="preserve">
+    <value>&amp;Redo</value>
+  </data>
+  <data name="MenuCut" xml:space="preserve">
+    <value>Cu&amp;t</value>
+  </data>
+  <data name="MenuCopy" xml:space="preserve">
+    <value>&amp;Copy</value>
+  </data>
+  <data name="MenuPaste" xml:space="preserve">
+    <value>&amp;Paste</value>
+  </data>
+  <data name="MenuDelete" xml:space="preserve">
+    <value>&amp;Delete</value>
+  </data>
+  <data name="MenuSelectAll" xml:space="preserve">
+    <value>Select &amp;All</value>
+  </data>
+  <data name="MenuFind" xml:space="preserve">
+    <value>&amp;Find...</value>
+  </data>
+  <data name="MenuReplace" xml:space="preserve">
+    <value>R&amp;eplace...</value>
+  </data>
+  <data name="MenuFindInFiles" xml:space="preserve">
+    <value>Find in F&amp;iles...</value>
+  </data>
+  <data name="MenuGoToLine" xml:space="preserve">
+    <value>&amp;Go to Line...</value>
+  </data>
+
+  <!-- View Menu -->
+  <data name="MenuView" xml:space="preserve">
+    <value>&amp;View</value>
+  </data>
+  <data name="MenuTheme" xml:space="preserve">
+    <value>&amp;Theme</value>
+  </data>
+  <data name="MenuLanguage" xml:space="preserve">
+    <value>&amp;Language</value>
+  </data>
+  <data name="MenuWordWrap" xml:space="preserve">
+    <value>&amp;Word Wrap</value>
+  </data>
+  <data name="MenuShowWhitespace" xml:space="preserve">
+    <value>Show &amp;Whitespace</value>
+  </data>
+  <data name="MenuLineNumbers" xml:space="preserve">
+    <value>Line &amp;Numbers</value>
+  </data>
+  <data name="MenuZoomIn" xml:space="preserve">
+    <value>Zoom &amp;In</value>
+  </data>
+  <data name="MenuZoomOut" xml:space="preserve">
+    <value>Zoom &amp;Out</value>
+  </data>
+  <data name="MenuResetZoom" xml:space="preserve">
+    <value>&amp;Reset Zoom</value>
+  </data>
+  <data name="MenuFullScreen" xml:space="preserve">
+    <value>&amp;Full Screen</value>
+  </data>
+  <data name="MenuSymbolList" xml:space="preserve">
+    <value>&amp;Symbol List</value>
+  </data>
+  <data name="MenuFindResults" xml:space="preserve">
+    <value>Find &amp;Results</value>
+  </data>
+
+  <!-- Encoding Menu -->
+  <data name="MenuEncoding" xml:space="preserve">
+    <value>E&amp;ncoding</value>
+  </data>
+  <data name="MenuConvertLineEndings" xml:space="preserve">
+    <value>Convert &amp;Line Endings</value>
+  </data>
+
+  <!-- Tools Menu -->
+  <data name="MenuTools" xml:space="preserve">
+    <value>&amp;Tools</value>
+  </data>
+  <data name="MenuHexEditor" xml:space="preserve">
+    <value>&amp;Hex Editor</value>
+  </data>
+  <data name="MenuRecordMacro" xml:space="preserve">
+    <value>&amp;Record Macro</value>
+  </data>
+  <data name="MenuStopRecording" xml:space="preserve">
+    <value>&amp;Stop Recording</value>
+  </data>
+  <data name="MenuPlayMacro" xml:space="preserve">
+    <value>&amp;Play Macro</value>
+  </data>
+  <data name="MenuMacroManager" xml:space="preserve">
+    <value>&amp;Macro Manager...</value>
+  </data>
+  <data name="MenuSettings" xml:space="preserve">
+    <value>S&amp;ettings...</value>
+  </data>
+
+  <!-- Plugins Menu -->
+  <data name="MenuPlugins" xml:space="preserve">
+    <value>Pl&amp;ugins</value>
+  </data>
+  <data name="MenuPluginManager" xml:space="preserve">
+    <value>&amp;Plugin Manager...</value>
+  </data>
+
+  <!-- Help Menu -->
+  <data name="MenuHelp" xml:space="preserve">
+    <value>&amp;Help</value>
+  </data>
+  <data name="MenuAbout" xml:space="preserve">
+    <value>&amp;About Bascanka</value>
+  </data>
+
+  <!-- Status Bar -->
+  <data name="StatusPosition" xml:space="preserve">
+    <value>Ln: 1, Col: 1</value>
+  </data>
+  <data name="StatusPositionFormat" xml:space="preserve">
+    <value>Ln: {0}, Col: {1}</value>
+  </data>
+  <data name="StatusSelectionFormat" xml:space="preserve">
+    <value>Sel: {0}</value>
+  </data>
+
+  <!-- Dialogs -->
+  <data name="PromptSaveChanges" xml:space="preserve">
+    <value>Do you want to save changes to "{0}"?</value>
+  </data>
+  <data name="ButtonOK" xml:space="preserve">
+    <value>OK</value>
+  </data>
+  <data name="ButtonCancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="ButtonYes" xml:space="preserve">
+    <value>Yes</value>
+  </data>
+  <data name="ButtonNo" xml:space="preserve">
+    <value>No</value>
+  </data>
+
+  <!-- Recent Files -->
+  <data name="NoRecentFiles" xml:space="preserve">
+    <value>(No recent files)</value>
+  </data>
+  <data name="ClearRecentFiles" xml:space="preserve">
+    <value>Clear Recent Files</value>
+  </data>
+
+  <!-- File Filter -->
+  <data name="FilterAllFiles" xml:space="preserve">
+    <value>All Files</value>
+  </data>
+
+  <!-- Errors -->
+  <data name="ErrorFileNotFound" xml:space="preserve">
+    <value>File not found: {0}</value>
+  </data>
+  <data name="ErrorOpeningFile" xml:space="preserve">
+    <value>Error opening file "{0}": {1}</value>
+  </data>
+  <data name="ErrorSavingFile" xml:space="preserve">
+    <value>Error saving file "{0}": {1}</value>
+  </data>
+  <data name="ErrorNoDocumentOpen" xml:space="preserve">
+    <value>No document is currently open.</value>
+  </data>
+  <data name="ErrorUnhandledException" xml:space="preserve">
+    <value>An unexpected error has occurred: {0}
+
+Details:
+{1}</value>
+  </data>
+  <data name="ErrorCompilingScript" xml:space="preserve">
+    <value>Failed to compile script plugin.</value>
+  </data>
+
+  <!-- File Watcher -->
+  <data name="FileModifiedExternally" xml:space="preserve">
+    <value>The file "{0}" has been modified externally. Do you want to reload it?
+
+Yes = Reload, No = Ignore, Cancel = Ignore All</value>
+  </data>
+  <data name="FileDeletedExternally" xml:space="preserve">
+    <value>The file "{0}" has been deleted or moved externally.</value>
+  </data>
+
+  <!-- Hex Editor -->
+  <data name="HexEditorRequiresFile" xml:space="preserve">
+    <value>The Hex Editor requires the document to be saved to a file first.</value>
+  </data>
+
+  <!-- Command Palette -->
+  <data name="CommandPaletteNotYetImplemented" xml:space="preserve">
+    <value>Command Palette will be available in a future version.</value>
+  </data>
+
+  <!-- About -->
+  <data name="AboutText" xml:space="preserve">
+    <value>Bascanka Text Editor
+Version 1.0.0
+
+A fast, lightweight text editor for Windows with syntax highlighting, plugin support, and multi-document editing.
+
+Built with .NET and Windows Forms.</value>
+  </data>
+
+  <!-- Session -->
+  <data name="SessionRestoreError" xml:space="preserve">
+    <value>Failed to restore the previous session.</value>
+  </data>
+
+  <!-- Search -->
+  <data name="SearchNotFound" xml:space="preserve">
+    <value>No matches found for "{0}".</value>
+  </data>
+  <data name="SearchReplacedCount" xml:space="preserve">
+    <value>Replaced {0} occurrence(s).</value>
+  </data>
+  <data name="SearchWrappedAround" xml:space="preserve">
+    <value>Search wrapped around to the beginning of the document.</value>
+  </data>
+
+  <!-- Printing -->
+  <data name="PrintJobName" xml:space="preserve">
+    <value>Bascanka - {0}</value>
+  </data>
+
+  <!-- Zoom -->
+  <data name="ZoomLevelFormat" xml:space="preserve">
+    <value>Zoom: {0}%</value>
+  </data>
+
+  <!-- Encoding -->
+  <data name="EncodingChanged" xml:space="preserve">
+    <value>Encoding changed to {0}.</value>
+  </data>
+
+  <!-- Line Endings -->
+  <data name="LineEndingChanged" xml:space="preserve">
+    <value>Line endings converted to {0}.</value>
+  </data>
+
+</root>

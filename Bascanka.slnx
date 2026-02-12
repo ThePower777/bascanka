@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Bascanka.App/Bascanka.App.csproj" />
+    <Project Path="src/Bascanka.Core/Bascanka.Core.csproj" />
+    <Project Path="src/Bascanka.Editor/Bascanka.Editor.csproj" />
+    <Project Path="src/Bascanka.Plugins.Api/Bascanka.Plugins.Api.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,173 @@
+{
+  "languageName": "Hrvatski",
+  "languageCode": "hr",
+  "strings": {
+    "AppTitle": "Bascanka",
+    "UntitledDocument": "Bez naslova {0}",
+    "PlainText": "Obi\u010dan tekst",
+
+    "MenuFile": "&Datoteka",
+    "MenuNew": "&Nova",
+    "MenuOpen": "&Otvori...",
+    "MenuOpenRecent": "Otvori &nedavno",
+    "MenuSave": "&Spremi",
+    "MenuSaveAs": "Spremi &kao...",
+    "MenuSaveAll": "Spremi s&ve",
+    "MenuPrint": "&Ispis...",
+    "MenuPrintPreview": "Pre&gled ispisa...",
+    "MenuExit": "&Izlaz",
+
+    "MenuEdit": "&Uredi",
+    "MenuUndo": "&Poni\u0161ti",
+    "MenuRedo": "Po&novi",
+    "MenuCut": "&Izre\u017ei",
+    "MenuCopy": "&Kopiraj",
+    "MenuPaste": "&Zalijepi",
+    "MenuDelete": "O&bri\u0161i",
+    "MenuSelectAll": "Odaberi s&ve",
+    "MenuFind": "&Tra\u017ei...",
+    "MenuReplace": "Za&mijeni...",
+    "MenuFindInFiles": "Tra\u017ei u &datotekama...",
+    "MenuGoToLine": "&Idi na redak...",
+
+    "MenuText": "&Tekst",
+    "MenuCaseConversion": "Pretvorba &veli\u010dine slova",
+    "MenuUpperCase": "&VELIKA SLOVA",
+    "MenuLowerCase": "&mala slova",
+    "MenuTitleCase": "&Po\u010detna Velika",
+    "MenuSwapCase": "&zAMIJENI vELI\u010cINU",
+    "MenuTextEncoding": "&Kodiranje / Dekodiranje",
+    "MenuBase64Encode": "Kodiraj &Base64",
+    "MenuBase64Decode": "Dekodiraj B&ase64",
+    "MenuUrlEncode": "Kodiraj &URL",
+    "MenuUrlDecode": "Dekodiraj U&RL",
+    "MenuHtmlEncode": "Kodiraj &HTML",
+    "MenuHtmlDecode": "Dekodiraj HT&ML",
+    "MenuSortLinesAsc": "Sortiraj retke (&A-Z)",
+    "MenuSortLinesDesc": "Sortiraj retke (&Z-A)",
+    "MenuRemoveDuplicateLines": "Ukloni &duplikate redaka",
+    "MenuReverseLines": "O&brnuti redoslijed redaka",
+    "MenuTrimTrailingWhitespace": "Obri\u0161i &zavr\u0161ne razmake",
+    "MenuTrimLeadingWhitespace": "Obri\u0161i &po\u010detne razmake",
+    "MenuCompactWhitespace": "Sa\u017emi &razmake",
+    "MenuTabsToSpaces": "Tabulatori u &razmake",
+    "MenuSpacesToTabs": "Razmaci u ta&bulatore",
+    "MenuReverseText": "Obrnuti te&kst",
+
+    "MenuView": "&Pogled",
+    "MenuTheme": "&Tema",
+    "MenuLanguage": "&Jezik",
+    "MenuUILanguage": "Jezik &su\u010delja",
+    "MenuWordWrap": "&Prelamanje teksta",
+    "MenuShowWhitespace": "Prika\u017ei &razmake",
+    "MenuLineNumbers": "Brojevi &redaka",
+    "MenuZoomIn": "&Pove\u0107aj",
+    "MenuZoomOut": "&Smanji",
+    "MenuResetZoom": "Po&nistiZum",
+    "MenuFullScreen": "&Cijeli zaslon",
+    "MenuSymbolList": "Popis &simbola",
+    "MenuFindResults": "Rezultati &pretra\u017eivanja",
+
+    "MenuEncoding": "&Kodiranje",
+    "MenuConvertLineEndings": "Pretvori &zavr\u0161etke redaka",
+
+    "MenuTools": "&Alati",
+    "MenuHexEditor": "&Hex editor",
+    "MenuRecordMacro": "&Snimi makro",
+    "MenuStopRecording": "&Zaustavi snimanje",
+    "MenuPlayMacro": "&Pokreni makro",
+    "MenuMacroManager": "Upravitelj &makroa...",
+    "MenuSettings": "P&ostavke...",
+
+    "MenuPlugins": "D&odaci",
+    "MenuPluginManager": "Upravitelj &dodataka...",
+
+    "MenuHelp": "&Pomo\u0107",
+    "MenuAbout": "&O programu Bascanka",
+
+    "StatusPosition": "Rd: 1, St: 1",
+    "StatusPositionFormat": "Rd: {0}, St: {1}",
+    "StatusSelectionFormat": "Ozn: {0}",
+
+    "PromptSaveChanges": "\u017delite li spremiti promjene u \"{0}\"?",
+    "ButtonOK": "U redu",
+    "ButtonCancel": "Odustani",
+    "ButtonYes": "Da",
+    "ButtonNo": "Ne",
+
+    "NoRecentFiles": "(Nema nedavnih datoteka)",
+    "ClearRecentFiles": "O\u010disti nedavne datoteke",
+
+    "FilterAllFiles": "Sve datoteke",
+
+    "ErrorFileNotFound": "Datoteka nije prona\u0111ena: {0}",
+    "ErrorOpeningFile": "Gre\u0161ka pri otvaranju datoteke \"{0}\": {1}",
+    "ErrorSavingFile": "Gre\u0161ka pri spremanju datoteke \"{0}\": {1}",
+    "ErrorNoDocumentOpen": "Nijedan dokument nije otvoren.",
+    "ErrorUnhandledException": "Do\u0161lo je do neo\u010dekivane gre\u0161ke: {0}\n\nDetalji:\n{1}",
+    "ErrorCompilingScript": "Kompilacija skriptnog dodatka nije uspjela.",
+
+    "FileModifiedExternally": "Datoteka \"{0}\" je izvana promijenjena. \u017delite li je ponovno u\u010ditati?\n\nDa = Ponovno u\u010ditaj, Ne = Zanemari, Odustani = Zanemari sve",
+    "FileDeletedExternally": "Datoteka \"{0}\" je izvana obrisana ili premje\u0161tena.",
+
+    "HexEditorRequiresFile": "Hex editor zahtijeva da dokument bude najprije spremljen u datoteku.",
+
+    "CommandPaletteNotYetImplemented": "Paleta naredbi bit \u0107e dostupna u budu\u0107oj verziji.",
+
+    "AboutText": "Bascanka ure\u0111iva\u010d teksta\nVerzija 1.0.0\n\nSveobuhvatni ure\u0111iva\u010d teksta za Windows s isticanjem sintakse, podr\u0161kom za dodatke i ure\u0111ivanjem vi\u0161e dokumenata.\n\nIzgra\u0111eno s .NET i Windows Forms.",
+
+    "SessionRestoreError": "Vra\u0107anje prethodne sesije nije uspjelo.",
+
+    "SearchNotFound": "Nije prona\u0111en nijedan rezultat za \"{0}\".",
+    "SearchReplacedCount": "Zamijenjeno {0} pojavljivanja.",
+    "SearchWrappedAround": "Pretra\u017eivanje je nastavilo od po\u010detka dokumenta.",
+
+    "PrintJobName": "Bascanka - {0}",
+
+    "ZoomLevelFormat": "Zum: {0}%",
+
+    "EncodingChanged": "Kodiranje promijenjeno u {0}.",
+
+    "LineEndingChanged": "Zavr\u0161eci redaka pretvoreni u {0}.",
+
+    "SettingsTitle": "Postavke",
+    "SettingsExplorerContextMenu": "Registriraj \"Edit with Bascanka\" u kontekstni izbornik Windows Explorera",
+    "SettingsExplorerContextMenuDesc": "Dodaje opciju desnog klika za otvaranje datoteka s Bascankom u Windows Exploreru.",
+
+    "TabMenuClose": "Zatvori",
+    "TabMenuCloseOthers": "Zatvori ostale",
+    "TabMenuCloseAll": "Zatvori sve",
+    "TabMenuCloseToRight": "Zatvori desno",
+    "TabMenuCopyPath": "Kopiraj putanju",
+    "TabMenuOpenInExplorer": "Otvori putanju u Exploreru",
+
+    "FindResultsCopyLine": "Kopiraj redak",
+    "FindResultsCopyAll": "Kopiraj sve rezultate",
+    "FindResultsCopyPath": "Kopiraj putanju",
+    "FindResultsOpenInNewTab": "Otvori rezultate u novoj kartici",
+    "FindResultsRemoveSearch": "Ukloni pretragu",
+    "FindResultsClearAll": "Obri\u0161i sve",
+    "FindResultsHeader": "Rezultati pretra\u017eivanja",
+    "FindResultsHeaderFormat": "Rezultati pretra\u017eivanja ({0})",
+
+    "ScopeCurrentDocument": "trenutni dokument",
+    "ScopeAllOpenTabs": "sve otvorene kartice",
+    "FindResultMatchFormat": "\"{0}\" \u2014 {1} pogodak/pogodaka  ({3})  [x]",
+    "FindResultMatchFilesFormat": "\"{0}\" \u2014 {1} pogodak/pogodaka u {3} datoteka  ({5})  [x]",
+
+    "CtxUndo": "Poni\u0161ti",
+    "CtxRedo": "Ponovi",
+    "CtxCut": "Izre\u017ei",
+    "CtxCopy": "Kopiraj",
+    "CtxPaste": "Zalijepi",
+    "CtxDelete": "Obri\u0161i",
+    "CtxSelectAll": "Odaberi sve",
+    "CtxSelectedText": "Odabrani tekst",
+
+    "FindPanelMarkAll": "Ozna\u010di sve",
+    "FindPanelFindAll": "Prona\u0111i sve",
+    "FindPanelFindInTabs": "Tra\u017ei u karticama",
+    "FindPanelReplace": "Zamijeni",
+    "FindPanelReplaceAll": "Sve"
+  }
+}
