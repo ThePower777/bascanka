@@ -55,6 +55,21 @@ public sealed class TabInfo
     public object? Tag { get; set; }
 
     /// <summary>
+    /// When true, the file has not been loaded yet. The document will be loaded
+    /// from <see cref="FilePath"/> when the tab is first activated.
+    /// </summary>
+    public bool IsDeferredLoad { get; set; }
+
+    /// <summary>Pending zoom level to apply after loading/activation.</summary>
+    public int PendingZoom { get; set; }
+
+    /// <summary>Pending scroll position to apply after loading/activation.</summary>
+    public int PendingScroll { get; set; }
+
+    /// <summary>Pending caret offset to apply after loading/activation.</summary>
+    public long PendingCaret { get; set; }
+
+    /// <summary>
     /// Returns the display title, including a modified indicator when applicable.
     /// </summary>
     public string DisplayTitle => IsModified ? $"* {Title}" : Title;

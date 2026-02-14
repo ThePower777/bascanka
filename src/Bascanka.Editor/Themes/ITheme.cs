@@ -122,6 +122,14 @@ public interface ITheme
     /// <summary>Colour of the scroll bar thumb.</summary>
     Color ScrollBarThumb { get; }
 
+    // ── Diff highlighting ────────────────────────────────────────────
+    Color DiffAddedBackground { get; }
+    Color DiffRemovedBackground { get; }
+    Color DiffModifiedBackground { get; }
+    Color DiffModifiedCharBackground { get; }
+    Color DiffPaddingBackground { get; }
+    Color DiffGutterMarker { get; }
+
     // ── Miscellaneous ─────────────────────────────────────────────────
 
     /// <summary>Colour of code-folding collapse/expand markers.</summary>

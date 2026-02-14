@@ -17,7 +17,7 @@ public sealed class InputHandler
     private CommandHistory? _history;
     private FoldingManager? _folding;
     private bool _insertMode = true; // true = Insert, false = Overwrite
-    private int _tabSize = 4;
+    private int _tabSize = EditorControl.DefaultTabWidth;
 
     /// <summary>Raised after text has been modified.</summary>
     public event Action? TextModified;
@@ -122,14 +122,14 @@ public sealed class InputHandler
         switch (keyCode)
         {
             case Keys.Left:
-                if (ctrl && shift) { _selection.StartSelection(_caret.Offset); _caret.MoveWordLeft(); _selection.ExtendSelection(_caret.Offset); }
+                if (ctrl && shift) { if (!_selection.HasSelection) _selection.StartSelection(_caret.Offset); _caret.MoveWordLeft(); _selection.ExtendSelection(_caret.Offset); }
                 else if (ctrl) { _selection.ClearSelection(); _caret.MoveWordLeft(); }
                 else if (shift) { if (!_selection.HasSelection) _selection.StartSelection(_caret.Offset); _caret.MoveLeft(); _selection.ExtendSelection(_caret.Offset); }
                 else { if (_selection.HasSelection) { _caret.MoveTo(_selection.SelectionStart); _selection.ClearSelection(); } else _caret.MoveLeft(); }
                 return true;
 
             case Keys.Right:
-                if (ctrl && shift) { _selection.StartSelection(_caret.Offset); _caret.MoveWordRight(); _selection.ExtendSelection(_caret.Offset); }
+                if (ctrl && shift) { if (!_selection.HasSelection) _selection.StartSelection(_caret.Offset); _caret.MoveWordRight(); _selection.ExtendSelection(_caret.Offset); }
                 else if (ctrl) { _selection.ClearSelection(); _caret.MoveWordRight(); }
                 else if (shift) { if (!_selection.HasSelection) _selection.StartSelection(_caret.Offset); _caret.MoveRight(); _selection.ExtendSelection(_caret.Offset); }
                 else { if (_selection.HasSelection) { _caret.MoveTo(_selection.SelectionEnd); _selection.ClearSelection(); } else _caret.MoveRight(); }
@@ -229,6 +229,32 @@ public sealed class InputHandler
 
                     case Keys.Down:
                         if (!ReadOnly) CopyLineDown();
+                        return true;
+
+                    case Keys.OemOpenBrackets: // Ctrl+Shift+[  → Fold current region
+                        if (_folding is not null && _caret is not null)
+                        {
+                            var region = _folding.GetFoldRegionContaining(_caret.Line);
+                            if (region.HasValue)
+                                _folding.Collapse(region.Value.StartLine);
+                        }
+                        return true;
+
+                    case Keys.OemCloseBrackets: // Ctrl+Shift+]  → Unfold current region
+                        if (_folding is not null && _caret is not null)
+                        {
+                            var region2 = _folding.GetFoldRegionContaining(_caret.Line);
+                            if (region2.HasValue)
+                                _folding.Expand(region2.Value.StartLine);
+                        }
+                        return true;
+
+                    case Keys.OemMinus: // Ctrl+Shift+-  → Collapse All
+                        _folding?.CollapseAll();
+                        return true;
+
+                    case Keys.Oemplus: // Ctrl+Shift+=  → Expand All
+                        _folding?.ExpandAll();
                         return true;
                 }
             }
@@ -383,14 +409,17 @@ public sealed class InputHandler
         DeleteSelectionIfAny();
 
         // Compute auto-indent: copy leading whitespace from current line.
-        string currentLineText = _document.GetLine(_caret.Line);
         string indent = "";
-        foreach (char c in currentLineText)
+        if (EditorControl.DefaultAutoIndent)
         {
-            if (c == ' ' || c == '\t')
-                indent += c;
-            else
-                break;
+            string currentLineText = _document.GetLine(_caret.Line);
+            foreach (char c in currentLineText)
+            {
+                if (c == ' ' || c == '\t')
+                    indent += c;
+                else
+                    break;
+            }
         }
 
         string newLine = "\n" + indent;

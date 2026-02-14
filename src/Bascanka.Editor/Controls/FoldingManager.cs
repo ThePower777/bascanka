@@ -106,6 +106,94 @@ public sealed class FoldingManager
             FoldingChanged?.Invoke();
     }
 
+    /// <summary>Collapses the fold region starting at <paramref name="startLine"/>.</summary>
+    public void Collapse(long startLine)
+    {
+        if (!_regionByStartLine.ContainsKey(startLine)) return;
+        if (_collapsedStartLines.Add(startLine))
+            FoldingChanged?.Invoke();
+    }
+
+    /// <summary>Expands the fold region starting at <paramref name="startLine"/>.</summary>
+    public void Expand(long startLine)
+    {
+        if (_collapsedStartLines.Remove(startLine))
+            FoldingChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Expands any collapsed region that hides the given line, making it visible.
+    /// </summary>
+    public void EnsureLineVisible(long line)
+    {
+        if (_collapsedStartLines.Count == 0) return;
+
+        bool changed = false;
+        foreach (long startLine in _collapsedStartLines.ToArray())
+        {
+            if (_regionByStartLine.TryGetValue(startLine, out FoldRegion region))
+            {
+                if (line > region.StartLine && line <= region.EndLine)
+                {
+                    _collapsedStartLines.Remove(startLine);
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed)
+            FoldingChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Given a line that may be inside a collapsed region, returns the nearest
+    /// visible line in the given direction.
+    /// </summary>
+    public long NextVisibleLine(long line, long totalLines, bool forward)
+    {
+        if (_collapsedStartLines.Count == 0) return line;
+
+        foreach (long startLine in _collapsedStartLines)
+        {
+            if (_regionByStartLine.TryGetValue(startLine, out FoldRegion region))
+            {
+                if (line > region.StartLine && line <= region.EndLine)
+                {
+                    if (forward)
+                        return Math.Min(region.EndLine + 1, totalLines - 1);
+                    else
+                        return region.StartLine;
+                }
+            }
+        }
+
+        return line;
+    }
+
+    /// <summary>
+    /// Returns the fold region whose StartLine equals <paramref name="line"/>,
+    /// or the innermost collapsed region containing that line, or null.
+    /// </summary>
+    public FoldRegion? GetFoldRegionContaining(long line)
+    {
+        // Direct match — O(1).
+        if (_regionByStartLine.TryGetValue(line, out FoldRegion exact))
+            return exact;
+
+        // Search for the innermost region containing this line.
+        FoldRegion? best = null;
+        foreach (var r in _regions)
+        {
+            if (line >= r.StartLine && line <= r.EndLine)
+            {
+                if (best is null || (r.EndLine - r.StartLine) < (best.Value.EndLine - best.Value.StartLine))
+                    best = r;
+            }
+        }
+
+        return best;
+    }
+
     // ────────────────────────────────────────────────────────────────────
     //  Visibility
     // ────────────────────────────────────────────────────────────────────
@@ -326,7 +414,7 @@ public sealed class FoldingManager
         foreach (char c in line)
         {
             if (c == ' ') count++;
-            else if (c == '\t') count += 4;
+            else if (c == '\t') count += EditorControl.DefaultTabWidth;
             else break;
         }
         return count;

@@ -51,13 +51,18 @@ public sealed class TabContextMenuOpeningEventArgs : EventArgs
 public class TabStrip : Control
 {
     // ── Constants ─────────────────────────────────────────────────────
-    private const int TabHeight = 30;
+    /// <summary>Configurable tab height in pixels (default 30).</summary>
+    public static int ConfigTabHeight { get; set; } = 30;
     private const int TabPaddingX = 12;
     private const int CloseButtonSize = 14;
     private const int CloseButtonMargin = 4;
     private const int ScrollArrowWidth = 20;
-    private const int MinTabWidth = 80;
-    private const int MaxTabWidth = 220;
+
+    /// <summary>Configurable minimum tab width in pixels (default 80).</summary>
+    public static int ConfigMinTabWidth { get; set; } = 80;
+
+    /// <summary>Configurable maximum tab width in pixels (default 220).</summary>
+    public static int ConfigMaxTabWidth { get; set; } = 220;
 
     // ── State ─────────────────────────────────────────────────────────
     private readonly List<TabInfo> _tabs = [];
@@ -97,7 +102,7 @@ public class TabStrip : Control
             ControlStyles.UserPaint,
             true);
 
-        Height = TabHeight;
+        Height = ConfigTabHeight;
 
         _contextMenu = BuildContextMenu();
         _dragManager = new TabDragManager(this);
@@ -196,6 +201,30 @@ public class TabStrip : Control
     }
 
     /// <summary>
+    /// Inserts a tab at the specified index.
+    /// </summary>
+    public void InsertTab(int index, TabInfo tab, bool select = true)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        if (index < 0 || index > _tabs.Count)
+            throw new ArgumentOutOfRangeException(nameof(index));
+
+        _tabs.Insert(index, tab);
+
+        // Adjust selected index if it shifted.
+        if (_selectedIndex >= index)
+            _selectedIndex++;
+
+        if (select)
+        {
+            _selectedIndex = index;
+            EnsureTabVisible(_selectedIndex);
+        }
+
+        Invalidate();
+    }
+
+    /// <summary>
     /// Removes the tab at the specified index.  If the removed tab was
     /// selected, the selection moves to the nearest neighbour.
     /// </summary>
@@ -263,7 +292,7 @@ public class TabStrip : Control
         for (int i = 0; i < index; i++)
             x += MeasureTabWidth(i);
 
-        return new Rectangle(x, 0, MeasureTabWidth(index), TabHeight);
+        return new Rectangle(x, 0, MeasureTabWidth(index), ConfigTabHeight);
     }
 
     /// <summary>
@@ -299,7 +328,7 @@ public class TabStrip : Control
         }
 
         // Clip to the tab area to avoid drawing over scroll arrows.
-        Rectangle clipRect = new(ScrollAreaLeft, 0, ScrollAreaWidth, TabHeight);
+        Rectangle clipRect = new(ScrollAreaLeft, 0, ScrollAreaWidth, ConfigTabHeight);
         g.SetClip(clipRect);
 
         // Paint tabs.
@@ -307,7 +336,7 @@ public class TabStrip : Control
         for (int i = 0; i < _tabs.Count; i++)
         {
             int tabW = MeasureTabWidth(i);
-            Rectangle tabRect = new(x, 0, tabW, TabHeight);
+            Rectangle tabRect = new(x, 0, tabW, ConfigTabHeight);
 
             bool isHover = i == _hoverTabIndex;
             PaintTab(g, i, tabRect, isHover);
@@ -364,7 +393,7 @@ public class TabStrip : Control
             Color modColor = _theme?.ModifiedIndicator ?? Color.Orange;
             int dotSize = 6;
             int dotX = rect.X + TabPaddingX / 2 - dotSize / 2 + 2;
-            int dotY = rect.Y + (TabHeight - dotSize) / 2;
+            int dotY = rect.Y + (ConfigTabHeight - dotSize) / 2;
             using var dotBrush = new SolidBrush(modColor);
             g.FillEllipse(dotBrush, dotX, dotY, dotSize, dotSize);
         }
@@ -375,7 +404,7 @@ public class TabStrip : Control
 
         if (textWidth > 0)
         {
-            var textRect = new Rectangle(textX, 0, textWidth, TabHeight);
+            var textRect = new Rectangle(textX, 0, textWidth, ConfigTabHeight);
             using var textBrush = new SolidBrush(fgColor);
             var sf = new StringFormat
             {
@@ -416,8 +445,8 @@ public class TabStrip : Control
     private void PaintScrollArrow(Graphics g, bool isLeft)
     {
         Rectangle rect = isLeft
-            ? new Rectangle(0, 0, ScrollArrowWidth, TabHeight)
-            : new Rectangle(Width - ScrollArrowWidth, 0, ScrollArrowWidth, TabHeight);
+            ? new Rectangle(0, 0, ScrollArrowWidth, ConfigTabHeight)
+            : new Rectangle(Width - ScrollArrowWidth, 0, ScrollArrowWidth, ConfigTabHeight);
 
         Color bg = _theme?.TabBarBackground ?? SystemColors.Control;
         using (var brush = new SolidBrush(bg))
@@ -785,7 +814,7 @@ public class TabStrip : Control
 
     private int MeasureTabWidth(int index)
     {
-        if (index < 0 || index >= _tabs.Count) return MinTabWidth;
+        if (index < 0 || index >= _tabs.Count) return ConfigMinTabWidth;
 
         TabInfo tab = _tabs[index];
         string text = tab.Title;
@@ -801,7 +830,7 @@ public class TabStrip : Control
         int closeArea = CloseButtonSize + CloseButtonMargin * 2;
         int totalWidth = TabPaddingX + modifiedExtra + textWidth + closeArea + TabPaddingX;
 
-        return Math.Clamp(totalWidth, MinTabWidth, MaxTabWidth);
+        return Math.Clamp(totalWidth, ConfigMinTabWidth, ConfigMaxTabWidth);
     }
 
     private static Rectangle GetCloseButtonRect(Rectangle tabRect)

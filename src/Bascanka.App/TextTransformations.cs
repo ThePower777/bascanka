@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Web;
 
 namespace Bascanka.App;
@@ -153,6 +155,56 @@ internal static class TextTransformations
 
     public static string SpacesToTabs(string text)
         => text.Replace("    ", "\t");
+
+    // ── JSON ────────────────────────────────────────────────────
+
+    public static string JsonFormat(string text)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(text.Trim(),
+                new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+            using var ms = new System.IO.MemoryStream();
+            using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions
+            {
+                Indented = true,
+                IndentCharacter = '\t',
+                IndentSize = 1,
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            }))
+            {
+                doc.WriteTo(writer);
+            }
+            return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        }
+        catch (JsonException)
+        {
+            return text; // Return original if invalid JSON.
+        }
+    }
+
+    public static string JsonMinimize(string text)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(text.Trim(),
+                new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+            using var ms = new System.IO.MemoryStream();
+            using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions
+            {
+                Indented = false,
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            }))
+            {
+                doc.WriteTo(writer);
+            }
+            return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        }
+        catch (JsonException)
+        {
+            return text; // Return original if invalid JSON.
+        }
+    }
 
     // ── Helpers ──────────────────────────────────────────────────────
 

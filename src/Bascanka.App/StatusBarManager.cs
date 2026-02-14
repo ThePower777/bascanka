@@ -27,6 +27,11 @@ public sealed class StatusBarManager
     private readonly ToolStripStatusLabel _brandingLabel;
     private readonly ToolStripStatusLabel _springLabel;
 
+    // Base widths used as proportional weights; actual widths are scaled
+    // to the status strip's current width on every resize.
+    private const int ReferenceWidth = 1000;
+    private readonly (ToolStripStatusLabel Label, int BaseWidth)[] _scaledLabels;
+
     public StatusBarManager(StatusStrip statusStrip)
     {
         _statusStrip = statusStrip;
@@ -71,6 +76,20 @@ public sealed class StatusBarManager
             Visible = false,
         };
 
+        _scaledLabels =
+        [
+            (_positionLabel,  120),
+            (_selectionLabel,  80),
+            (_encodingLabel,   90),
+            (_lineEndingLabel, 50),
+            (_languageLabel,  100),
+            (_fileSizeLabel,   70),
+            (_insertModeLabel, 40),
+            (_readOnlyLabel,   30),
+            (_zoomLabel,       90),
+            (_macroRecordingLabel, 40),
+        ];
+
         _statusStrip.Items.AddRange(new ToolStripItem[]
         {
             _positionLabel,
@@ -86,6 +105,8 @@ public sealed class StatusBarManager
             _readOnlyLabel,
             _brandingLabel,
         });
+
+        _statusStrip.Resize += (_, _) => ScaleLabelWidths();
     }
 
     /// <summary>
@@ -122,11 +143,18 @@ public sealed class StatusBarManager
         // Line ending.
         _lineEndingLabel.Text = editor.LineEnding;
 
-        // Language.
-        ILexer? lexer = editor.CurrentLexer;
-        _languageLabel.Text = lexer is not null
-            ? FormatLanguageName(lexer.LanguageId)
-            : Strings.PlainText;
+        // Language / custom profile.
+        if (editor.CustomProfileName is not null)
+        {
+            _languageLabel.Text = editor.CustomProfileName;
+        }
+        else
+        {
+            ILexer? lexer = editor.CurrentLexer;
+            _languageLabel.Text = lexer is not null
+                ? FormatLanguageName(lexer.LanguageId)
+                : Strings.PlainText;
+        }
 
         // File size.
         long length = editor.GetBufferLength();
@@ -220,6 +248,17 @@ public sealed class StatusBarManager
         }
     }
 
+    // ── Proportional sizing ────────────────────────────────────────
+
+    private void ScaleLabelWidths()
+    {
+        double scale = _statusStrip.Width / (double)ReferenceWidth;
+        foreach (var (label, baseWidth) in _scaledLabels)
+        {
+            label.Width = Math.Max(20, (int)(baseWidth * scale));
+        }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────
 
     private static ToolStripStatusLabel CreateLabel(string text, int width)
@@ -306,6 +345,20 @@ public sealed class StatusBarManager
         var menu = new ContextMenuStrip();
         menu.Items.Add(MakeCheckedPopupItem(Strings.PlainText, currentLanguage,
             () => form.SetLanguage("plaintext")));
+
+        // Custom highlighting profiles.
+        var customProfiles = form.CustomHighlightProfiles;
+        if (customProfiles.Count > 0)
+        {
+            menu.Items.Add(new ToolStripSeparator());
+            foreach (var profile in customProfiles)
+            {
+                string capturedName = profile.Name;
+                menu.Items.Add(MakeCheckedPopupItem(capturedName, currentLanguage,
+                    () => form.SetCustomHighlightProfile(capturedName)));
+            }
+        }
+
         menu.Items.Add(new ToolStripSeparator());
 
         foreach (string langId in LexerRegistry.Instance.LanguageIds)

@@ -111,7 +111,7 @@ public static class SymbolParser
             return [];
 
         long docLength = buffer.Length;
-        if (docLength == 0)
+        if (docLength == 0 || docLength > 2_000_000) // Skip for very large files (>2 MB).
             return [];
 
         // Extract the full text.  For very large files this could be chunked,

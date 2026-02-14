@@ -2,9 +2,11 @@ using System.Drawing;
 using System.Text.RegularExpressions;
 using Bascanka.Core.Buffer;
 using Bascanka.Core.Commands;
+using Bascanka.Core.Diff;
 using Bascanka.Core.Search;
 using Bascanka.Core.Syntax;
 using Bascanka.Editor.HexEditor;
+using Bascanka.Editor.Highlighting;
 using Bascanka.Editor.Macros;
 using Bascanka.Editor.Panels;
 using Bascanka.Editor.Themes;
@@ -48,6 +50,11 @@ public sealed class EditorControl : UserControl
     private bool _readOnly;
     private string? _filePath;
 
+    // ── Custom highlighting ─────────────────────────────────────────────
+    private CustomHighlightMatcher? _customHighlightMatcher;
+    private string? _customProfileName;
+    private List<BlockRegion>? _customBlockRegions;
+
     // ── Find/Replace panel ─────────────────────────────────────────────
     private FindReplacePanel? _findPanel;
 
@@ -73,6 +80,26 @@ public sealed class EditorControl : UserControl
     private readonly ToolStripMenuItem _ctxPaste;
     private readonly ToolStripMenuItem _ctxDelete;
     private readonly ToolStripMenuItem _ctxSelectAll;
+
+    // ── Configurable defaults (set from SettingsManager at startup) ────
+    public static string DefaultFontFamily { get; set; } = "Consolas";
+    public static float DefaultFontSize { get; set; } = 11f;
+    public static int DefaultTabWidth { get; set; } = 4;
+    public static int DefaultScrollSpeed { get; set; } = 3;
+    public static int DefaultCaretBlinkRate { get; set; } = 500;
+    public static long FoldingMaxFileSize { get; set; } = 50_000_000;
+    public static bool DefaultAutoIndent { get; set; } = true;
+    public static int DefaultCaretScrollBuffer { get; set; } = 4;
+    public static int DefaultTextLeftPadding { get; set; } = 6;
+    public static int DefaultLineSpacing { get; set; } = 2;
+    public static float DefaultMinZoomFontSize { get; set; } = 6f;
+    public static int DefaultWhitespaceOpacity { get; set; } = 100;
+    public static int DefaultFoldIndicatorOpacity { get; set; } = 60;
+    public static int DefaultGutterPaddingLeft { get; set; } = 8;
+    public static int DefaultGutterPaddingRight { get; set; } = 12;
+    public static int DefaultFoldButtonSize { get; set; } = 10;
+    public static int DefaultBookmarkSize { get; set; } = 8;
+    public static int DefaultSearchDebounce { get; set; } = 300;
 
     // ── Extended state ──────────────────────────────────────────────────
     private Bascanka.Core.Encoding.EncodingManager? _encodingManager;
@@ -140,6 +167,7 @@ public sealed class EditorControl : UserControl
         _selectionManager = new SelectionManager { Document = _document };
         _scrollManager = new ScrollManager();
         _foldingManager = new FoldingManager();
+        _caretManager.Folding = _foldingManager;
         _gutterRenderer = new GutterRenderer();
 
         _inputHandler = new InputHandler
@@ -323,6 +351,7 @@ public sealed class EditorControl : UserControl
             _surface.Lexer = _lexer;
             _tokenCache.Clear();
             RetokenizeAllVisible();
+            DetectFoldingRegions();
             Invalidate(true);
         }
     }
@@ -401,6 +430,26 @@ public sealed class EditorControl : UserControl
         {
             _wordWrap = value;
             _surface.WordWrap = value;
+
+            // When word-wrap is active, the caret needs to compute its visible
+            // row in wrap-row space for correct scroll-into-view behavior.
+            if (value)
+            {
+                _caretManager.LineColumnToVisibleRow = (docLine, col) =>
+                {
+                    string text = _document.GetLine(docLine);
+                    int expandedCol = ExpandedLength(text, (int)Math.Min(col, text.Length));
+                    int wrapCols = _surface.WrapColumns;
+                    int wrapRow = wrapCols > 0 ? expandedCol / wrapCols : 0;
+                    return _surface.DocumentLineToWrapRow(docLine, wrapRow);
+                };
+            }
+            else
+            {
+                _caretManager.LineColumnToVisibleRow = null;
+            }
+
+            UpdateScrollBars();
             _surface.Invalidate();
             _gutterPanel.Invalidate();
         }
@@ -447,6 +496,13 @@ public sealed class EditorControl : UserControl
     /// <summary>Current zoom level as a percentage (100 = default).</summary>
     public int ZoomPercentage => (int)Math.Round(Math.Max(6, 11 + _zoomLevel) / 11.0 * 100);
 
+    /// <summary>Gets or sets the raw zoom level (0 = default, positive = zoomed in, negative = zoomed out).</summary>
+    public int ZoomLevel
+    {
+        get => _zoomLevel;
+        set { _zoomLevel = value; ApplyZoom(); }
+    }
+
     /// <summary>Whether the hex editor split panel is currently visible.</summary>
     public bool IsHexPanelVisible
     {
@@ -463,6 +519,18 @@ public sealed class EditorControl : UserControl
 
     /// <summary>Whether this editor is showing a binary file in hex-only mode.</summary>
     public bool IsBinaryMode => _isBinaryMode;
+
+    /// <summary>Per-line diff metadata for diff view mode.</summary>
+    public DiffLine[]? DiffLineMarkers
+    {
+        get => _surface.DiffLineMarkers;
+        set
+        {
+            _surface.DiffLineMarkers = value;
+            _gutterRenderer.DiffLineMarkers = value;
+            Invalidate(true);
+        }
+    }
 
     /// <summary>
     /// Opens raw bytes in hex-only mode: the text editor is hidden and only
@@ -510,6 +578,9 @@ public sealed class EditorControl : UserControl
 
     /// <summary>The currently active lexer, or null for plain text.</summary>
     public ILexer? CurrentLexer => _lexer;
+
+    /// <summary>The name of the active custom highlight profile, or null if none.</summary>
+    public string? CustomProfileName => _customProfileName;
 
     // ────────────────────────────────────────────────────────────────────
     //  Public methods
@@ -575,8 +646,10 @@ public sealed class EditorControl : UserControl
     public void GoToLine(long line)
     {
         line = Math.Clamp(line, 0, _document.LineCount - 1);
+        _foldingManager.EnsureLineVisible(line);
         _caretManager.MoveToLineColumn(line, 0);
-        _scrollManager.EnsureLineVisible(line);
+        long visLine = _foldingManager.DocumentLineToVisibleLine(line);
+        _scrollManager.EnsureLineVisible(visLine >= 0 ? visLine : line);
         _selectionManager.ClearSelection();
         Invalidate(true);
     }
@@ -660,10 +733,14 @@ public sealed class EditorControl : UserControl
     private void SelectAndScrollTo(long offset, int length)
     {
         _selectionManager.ClearSelection();
+        // Auto-expand any collapsed region hiding the target.
+        var (targetLine, _) = _document.OffsetToLineColumn(offset);
+        _foldingManager.EnsureLineVisible(targetLine);
         _selectionManager.StartSelection(offset);
         _selectionManager.ExtendSelection(offset + length);
         _caretManager.MoveTo(offset + length);
-        _scrollManager.EnsureLineVisible(_caretManager.Line);
+        long visLine = _foldingManager.DocumentLineToVisibleLine(_caretManager.Line);
+        _scrollManager.EnsureLineVisible(visLine >= 0 ? visLine : _caretManager.Line);
         Invalidate(true);
     }
 
@@ -680,11 +757,75 @@ public sealed class EditorControl : UserControl
     /// <summary>Sets the syntax highlighting lexer.</summary>
     public void SetLexer(ILexer? lexer)
     {
+        // Clear custom highlighting when switching to a built-in lexer.
+        _customHighlightMatcher = null;
+        _customProfileName = null;
+        _customBlockRegions = null;
+        _surface.CustomHighlightMatcher = null;
+        _surface.CustomBlockRegions = null;
+
         _lexer = lexer;
         _language = lexer?.LanguageId ?? string.Empty;
         _surface.Lexer = _lexer;
         _tokenCache.Clear();
         RetokenizeAllVisible();
+        DetectFoldingRegions();
+        Invalidate(true);
+    }
+
+    /// <summary>
+    /// Activates custom regex-based highlighting from a profile, replacing
+    /// the built-in lexer. Pass null to deactivate.
+    /// </summary>
+    public void SetCustomHighlighting(CustomHighlightProfile? profile)
+    {
+        if (profile is not null)
+        {
+            _customHighlightMatcher = new CustomHighlightMatcher(profile);
+            _customProfileName = profile.Name;
+            _lexer = null;
+            _language = string.Empty;
+            _surface.Lexer = null;
+            _tokenCache.Clear();
+
+            // Scan block regions if the matcher has block rules and the document is small enough.
+            // Block scanning uses efficient batch line reads — allow up to 50 M chars
+            // (vs 10 M for language fold detection which uses per-line GetLine calls).
+            if (_customHighlightMatcher.HasBlockRules && _document.Length < FoldingMaxFileSize)
+            {
+                _customBlockRegions = _customHighlightMatcher.ScanBlocks(
+                    (start, count) =>
+                    {
+                        var data = _document.GetLineRange(start, count);
+                        var texts = new string[data.Length];
+                        for (int i = 0; i < data.Length; i++)
+                            texts[i] = data[i].Text;
+                        return texts;
+                    },
+                    _document.LineCount);
+                _surface.CustomBlockRegions = _customBlockRegions;
+
+                // Set foldable block regions.
+                var foldRegions = _customBlockRegions
+                    .Where(b => b.Foldable)
+                    .Select(b => new FoldRegion(b.StartLine, b.EndLine));
+                _foldingManager.SetRegions(foldRegions);
+            }
+            else
+            {
+                _customBlockRegions = null;
+                _surface.CustomBlockRegions = null;
+            }
+        }
+        else
+        {
+            _customHighlightMatcher = null;
+            _customProfileName = null;
+            _customBlockRegions = null;
+            _surface.CustomBlockRegions = null;
+            _foldingManager.SetRegions(Enumerable.Empty<FoldRegion>());
+        }
+        _surface.CustomHighlightMatcher = _customHighlightMatcher;
         Invalidate(true);
     }
 
@@ -1180,6 +1321,8 @@ public sealed class EditorControl : UserControl
         _selectionManager.ExtendSelection(start + transformed.Length);
         _caretManager.MoveTo(start + transformed.Length);
 
+        UpdateScrollBars();
+        RetokenizeAllVisible();
         Invalidate(true);
         TextChanged?.Invoke(this, EventArgs.Empty);
         ContentChanged?.Invoke(this, EventArgs.Empty);
@@ -1201,6 +1344,48 @@ public sealed class EditorControl : UserControl
         _selectionManager.ClearSelection();
         _caretManager.MoveTo(0);
 
+        UpdateScrollBars();
+        RetokenizeAllVisible();
+        Invalidate(true);
+        TextChanged?.Invoke(this, EventArgs.Empty);
+        ContentChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Replaces a range of text at a specific offset, recorded as an undoable command.
+    /// Used by Find/Replace to ensure the document is marked dirty.
+    /// </summary>
+    public void ReplaceRange(long offset, long length, string newText)
+    {
+        var cmd = new Core.Commands.ReplaceCommand(_document, offset, length, newText);
+        _commandHistory.Execute(cmd);
+
+        UpdateScrollBars();
+        RetokenizeAllVisible();
+        Invalidate(true);
+        TextChanged?.Invoke(this, EventArgs.Empty);
+        ContentChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Replaces multiple ranges in a single undoable operation.
+    /// Replacements must be provided in reverse document order (end to start)
+    /// so that earlier offsets remain valid as later ones are modified.
+    /// </summary>
+    public void ReplaceAllRanges(IReadOnlyList<(long Offset, long Length, string Replacement)> replacements)
+    {
+        if (replacements.Count == 0) return;
+
+        var commands = new List<Core.Commands.ICommand>(replacements.Count);
+        foreach (var (offset, length, replacement) in replacements)
+            commands.Add(new Core.Commands.ReplaceCommand(_document, offset, length, replacement));
+
+        var composite = new Core.Commands.CompositeCommand("Replace All", commands);
+        _commandHistory.Execute(composite);
+
+        _selectionManager.ClearSelection();
+        UpdateScrollBars();
+        RetokenizeAllVisible();
         Invalidate(true);
         TextChanged?.Invoke(this, EventArgs.Empty);
         ContentChanged?.Invoke(this, EventArgs.Empty);
@@ -1240,14 +1425,63 @@ public sealed class EditorControl : UserControl
         Invalidate(true);
     }
 
+    // ────────────────────────────────────────────────────────────────────
+    //  Code folding
+    // ────────────────────────────────────────────────────────────────────
+
+    /// <summary>Toggles the fold region at the caret.</summary>
+    public void ToggleFoldAtCaret()
+    {
+        var region = _foldingManager.GetFoldRegionContaining(_caretManager.Line);
+        if (region.HasValue)
+            _foldingManager.Toggle(region.Value.StartLine);
+    }
+
+    /// <summary>Collapses the fold region at the caret.</summary>
+    public void FoldAtCaret()
+    {
+        var region = _foldingManager.GetFoldRegionContaining(_caretManager.Line);
+        if (region.HasValue)
+            _foldingManager.Collapse(region.Value.StartLine);
+    }
+
+    /// <summary>Expands the fold region at the caret.</summary>
+    public void UnfoldAtCaret()
+    {
+        var region = _foldingManager.GetFoldRegionContaining(_caretManager.Line);
+        if (region.HasValue)
+            _foldingManager.Expand(region.Value.StartLine);
+    }
+
+    /// <summary>Collapses all foldable regions.</summary>
+    public void FoldAll() => _foldingManager.CollapseAll();
+
+    /// <summary>Expands all collapsed regions.</summary>
+    public void UnfoldAll() => _foldingManager.ExpandAll();
+
     private void ApplyZoom()
     {
-        float newSize = Math.Max(6, 11 + _zoomLevel);
+        float newSize = Math.Max(DefaultMinZoomFontSize, DefaultFontSize + _zoomLevel);
         _surface.Font = new Font(_surface.Font.FontFamily, newSize, _surface.Font.Style, GraphicsUnit.Point);
         UpdateScrollBars();
         _gutterPanel.Invalidate();
         Invalidate(true);
         ZoomChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Applies the current static default settings (font, tab width, etc.) to this editor instance.
+    /// Call after changing any <c>Default*</c> static properties.
+    /// </summary>
+    public void ApplySettings()
+    {
+        _surface.Font = new Font(DefaultFontFamily, Math.Max(DefaultMinZoomFontSize, DefaultFontSize + _zoomLevel), FontStyle.Regular, GraphicsUnit.Point);
+        _surface.TabSize = DefaultTabWidth;
+        _inputHandler.TabSize = DefaultTabWidth;
+        _caretManager.BlinkInterval = DefaultCaretBlinkRate;
+        UpdateScrollBars();
+        _gutterPanel.Invalidate();
+        Invalidate(true);
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -1276,8 +1510,16 @@ public sealed class EditorControl : UserControl
 
     private void UpdateScrollBars()
     {
-        long totalVisibleLines = _foldingManager.GetVisibleLineCount(_document.LineCount);
-        int maxLineWidth = EstimateMaxLineWidth();
+        long totalVisibleLines;
+        if (_wordWrap)
+        {
+            totalVisibleLines = _surface.GetTotalWrapRows();
+        }
+        else
+        {
+            totalVisibleLines = _foldingManager.GetVisibleLineCount(_document.LineCount);
+        }
+        int maxLineWidth = _wordWrap ? 0 : EstimateMaxLineWidth();
 
         _scrollManager.UpdateScrollBars(
             totalVisibleLines,
@@ -1315,7 +1557,10 @@ public sealed class EditorControl : UserControl
 
         for (int i = 0; i < lineData.Length; i++)
         {
-            int expanded = ExpandedLength(lineData[i].Text);
+            string text = lineData[i].Text;
+            // For extremely long lines, use the raw character count as an
+            // approximation to avoid iterating millions of characters.
+            int expanded = text.Length > 100_000 ? text.Length : ExpandedLength(text);
             if (expanded > maxWidth) maxWidth = expanded;
         }
 
@@ -1336,6 +1581,21 @@ public sealed class EditorControl : UserControl
         return col;
     }
 
+    private int ExpandedLength(string text, int charIndex)
+    {
+        int col = 0;
+        int limit = Math.Min(charIndex, text.Length);
+        int tabSize = _surface.TabSize;
+        for (int i = 0; i < limit; i++)
+        {
+            if (text[i] == '\t')
+                col += tabSize - (col % tabSize);
+            else
+                col++;
+        }
+        return col;
+    }
+
     // ────────────────────────────────────────────────────────────────────
     //  Syntax highlighting
     // ────────────────────────────────────────────────────────────────────
@@ -1346,15 +1606,49 @@ public sealed class EditorControl : UserControl
 
         long firstVisible = _scrollManager.FirstVisibleLine;
         int visibleCount = _surface.VisibleLineCount + 2;
-        long lastLine = Math.Min(firstVisible + visibleCount, _document.LineCount);
 
-        if (firstVisible >= _document.LineCount) return;
+        // Map visible-line indices to document lines so we tokenize the
+        // correct range when folds are active.
+        long minDocLine = long.MaxValue, maxDocLine = long.MinValue;
 
-        // Check if all visible lines already have valid tokens cached.
-        bool allCached = true;
-        for (long line = firstVisible; line < lastLine; line++)
+        if (_wordWrap)
         {
-            if (_tokenCache.GetCachedTokens(line) is null)
+            // firstVisible is a wrap-row index; map to document lines.
+            var (startDoc, _) = _surface.WrapRowToDocumentLine(firstVisible);
+            int wrapCols = _surface.WrapColumns;
+            int rowsBudget = visibleCount;
+            for (long dl = startDoc; dl < _document.LineCount && rowsBudget > 0; dl++)
+            {
+                if (!_foldingManager.IsLineVisible(dl))
+                    continue;
+                if (dl < minDocLine) minDocLine = dl;
+                if (dl > maxDocLine) maxDocLine = dl;
+                long len = _document.GetLineLength(dl);
+                int rows = len <= wrapCols ? 1
+                    : Math.Max(1, (int)((len + wrapCols - 1) / wrapCols));
+                rowsBudget -= rows;
+            }
+        }
+        else
+        {
+            for (int i = 0; i < visibleCount; i++)
+            {
+                long docLine = _foldingManager.VisibleLineToDocumentLine(firstVisible + i);
+                if (docLine >= _document.LineCount) break;
+                if (docLine < minDocLine) minDocLine = docLine;
+                if (docLine > maxDocLine) maxDocLine = docLine;
+            }
+        }
+
+        if (minDocLine > maxDocLine || minDocLine >= _document.LineCount) return;
+
+        long lastLine = Math.Min(maxDocLine + 1, _document.LineCount);
+
+        // Check if all visible document lines already have valid tokens cached.
+        bool allCached = true;
+        for (long dl = minDocLine; dl <= maxDocLine; dl++)
+        {
+            if (_tokenCache.GetCachedTokens(dl) is null)
             {
                 allCached = false;
                 break;
@@ -1364,12 +1658,12 @@ public sealed class EditorControl : UserControl
         if (allCached) return; // Nothing to do.
 
         // Find the start state by scanning backward from the first visible
-        // line.  Limit the backward scan to avoid tokenizing the entire
-        // document when jumping to a distant position.
-        long tokenizeFrom = firstVisible;
+        // document line.  Limit the backward scan to avoid tokenizing the
+        // entire document when jumping to a distant position.
+        long tokenizeFrom = minDocLine;
         LexerState currentState = LexerState.Normal;
 
-        for (long line = firstVisible - 1; line >= 0; line--)
+        for (long line = minDocLine - 1; line >= 0; line--)
         {
             LexerState? state = _tokenCache.GetCachedState(line);
             if (state.HasValue)
@@ -1379,7 +1673,7 @@ public sealed class EditorControl : UserControl
                 break;
             }
 
-            if (firstVisible - line > 500)
+            if (minDocLine - line > 500)
             {
                 // Too far back — start from line 0 with Normal state rather
                 // than scanning thousands of lines for a cached state.
@@ -1389,7 +1683,7 @@ public sealed class EditorControl : UserControl
             }
         }
 
-        if (tokenizeFrom < firstVisible)
+        if (tokenizeFrom < minDocLine)
             tokenizeFrom = 0;  // No cached state found; start from beginning.
 
         // Batch-fetch all lines we need to tokenize.
@@ -1410,11 +1704,35 @@ public sealed class EditorControl : UserControl
         // Placeholder for shebang / modeline detection.
     }
 
+    /// <summary>
+    /// Ensures the editor surface has focus and forces a full
+    /// scrollbar update and synchronous repaint.
+    /// Call after making the editor visible for the first time.
+    /// </summary>
+    public void ActivateAndRefresh()
+    {
+        _surface.Focus();
+        UpdateScrollBars();
+        RetokenizeAllVisible();
+        _surface.Invalidate();
+        _surface.Update();
+        _gutterPanel.Invalidate();
+        _gutterPanel.Update();
+    }
+
     private void DetectFoldingRegions()
     {
         if (_language.Length > 0)
         {
+            // Language fold detection uses per-line GetLine() — too expensive for large docs.
+            if (_document.Length >= FoldingMaxFileSize) return;
             _foldingManager.DetectFoldingRegions(_document, _language);
+        }
+        else if (_customBlockRegions is not null)
+        {
+            _foldingManager.SetRegions(_customBlockRegions
+                .Where(b => b.Foldable)
+                .Select(b => new FoldRegion(b.StartLine, b.EndLine)));
         }
     }
 
@@ -1439,7 +1757,8 @@ public sealed class EditorControl : UserControl
             _caretManager.Line,
             _foldingManager,
             _theme,
-            _wordWrap ? (Func<long, int>)_surface.GetWrapRowCount : null);
+            _wordWrap ? (Func<long, int>)_surface.GetWrapRowCount : null,
+            _wordWrap ? (Func<long, (long, int)>)_surface.WrapRowToDocumentLine : null);
     }
 
     private void OnGutterMouseDown(object? sender, MouseEventArgs e)
@@ -1447,8 +1766,9 @@ public sealed class EditorControl : UserControl
         if (e.Button != MouseButtons.Left) return;
 
         var wrapFunc = _wordWrap ? (Func<long, int>)_surface.GetWrapRowCount : null;
+        Func<long, (long, int)>? wrapMapFunc = _wordWrap ? _surface.WrapRowToDocumentLine : null;
         long line = _gutterRenderer.GetLineFromY(
-            e.Y, _surface.LineHeight, _scrollManager.FirstVisibleLine, _foldingManager, wrapFunc);
+            e.Y, _surface.LineHeight, _scrollManager.FirstVisibleLine, _foldingManager, wrapFunc, wrapMapFunc);
 
         if (_gutterRenderer.IsFoldButtonHit(e.X))
         {
@@ -1476,8 +1796,9 @@ public sealed class EditorControl : UserControl
         if (e.Button != MouseButtons.Left || !_selectionManager.HasSelection) return;
 
         var wrapFunc2 = _wordWrap ? (Func<long, int>)_surface.GetWrapRowCount : null;
+        Func<long, (long, int)>? wrapMapFunc2 = _wordWrap ? _surface.WrapRowToDocumentLine : null;
         long line = _gutterRenderer.GetLineFromY(
-            e.Y, _surface.LineHeight, _scrollManager.FirstVisibleLine, _foldingManager, wrapFunc2);
+            e.Y, _surface.LineHeight, _scrollManager.FirstVisibleLine, _foldingManager, wrapFunc2, wrapMapFunc2);
 
         if (line >= 0 && line < _document.LineCount)
         {
@@ -1499,13 +1820,17 @@ public sealed class EditorControl : UserControl
 
     private void OnScrollChanged()
     {
-        // Repaint gutter immediately so line numbers stay responsive.
-        _gutterPanel.Invalidate();
-        _gutterPanel.Update();
-
-        // Tokenize newly visible lines, then repaint the editor surface.
+        // Tokenize newly visible lines BEFORE repainting so tokens are ready.
         RetokenizeAllVisible();
+
+        // Repaint both gutter and surface synchronously together so they
+        // scroll in lock-step. Previously the gutter was Updated first,
+        // tokenization ran, and the surface was only Invalidated (queued),
+        // causing the text to visibly lag behind the line numbers.
+        _gutterPanel.Invalidate();
         _surface.Invalidate();
+        _gutterPanel.Update();
+        _surface.Update();
     }
 
     private void OnCaretMoved(long newOffset)
@@ -1530,7 +1855,17 @@ public sealed class EditorControl : UserControl
 
     private void OnFoldingChanged()
     {
+        // If the caret is now hidden inside a collapsed fold, move it to
+        // the fold's start line so it stays visible and anchored.
+        if (!_foldingManager.IsLineVisible(_caretManager.Line))
+        {
+            long visLine = _foldingManager.NextVisibleLine(
+                _caretManager.Line, _document.LineCount, forward: false);
+            _caretManager.MoveToLineColumn(visLine, 0);
+        }
+
         UpdateScrollBars();
+        RetokenizeAllVisible();
         _surface.Invalidate();
         _gutterPanel.Invalidate();
     }
@@ -1558,8 +1893,14 @@ public sealed class EditorControl : UserControl
         // Adjust token cache for line insertions/deletions.
         if (e.NewLength > 0 || e.OldLength > 0)
         {
-            // Simple invalidation: invalidate from the changed line onward.
-            long changeLine = _caretManager.Line;
+            // Derive the affected line from the change offset rather than
+            // the caret position — the caret may not have moved yet when a
+            // bulk replacement (e.g. JSON Format) fires this event.
+            long changeLine = 0;
+            if (e.Offset > 0 && e.Offset <= _document.Length)
+            {
+                (changeLine, _) = _document.OffsetToLineColumn(e.Offset);
+            }
             _tokenCache.Invalidate(changeLine, _document.LineCount - changeLine);
         }
     }

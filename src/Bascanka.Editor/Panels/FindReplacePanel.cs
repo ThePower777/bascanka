@@ -1,3 +1,5 @@
+using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Text.RegularExpressions;
 using Bascanka.Core.Buffer;
 using Bascanka.Core.Search;
@@ -13,8 +15,9 @@ namespace Bascanka.Editor.Panels;
 public class FindReplacePanel : UserControl
 {
     // ── Constants ─────────────────────────────────────────────────────
-    private const int MaxHistoryItems = 25;
-    private const int DebounceMsec = 300;
+    /// <summary>Configurable max search history entries (default 25).</summary>
+    public static int ConfigMaxHistoryItems { get; set; } = 25;
+    private static int DebounceMsec => EditorControl.DefaultSearchDebounce;
     private const int PanelWidth = 520;
     private const int FindRowHeight = 40;
     private const int ReplaceRowHeight = 40;
@@ -22,23 +25,23 @@ public class FindReplacePanel : UserControl
 
     // ── Controls: Find row ────────────────────────────────────────────
     private readonly ComboBox _searchBox;
-    private readonly Button _btnMatchCase;
-    private readonly Button _btnWholeWord;
-    private readonly Button _btnRegex;
-    private readonly Button _btnFindNext;
-    private readonly Button _btnFindPrev;
-    private readonly Button _btnCount;
-    private readonly Button _btnMarkAll;
-    private readonly Button _btnFindAll;
-    private readonly Button _btnFindAllTabs;
+    private readonly PanelButton _btnMatchCase;
+    private readonly PanelButton _btnWholeWord;
+    private readonly PanelButton _btnRegex;
+    private readonly PanelButton _btnFindNext;
+    private readonly PanelButton _btnFindPrev;
+    private readonly PanelButton _btnCount;
+    private readonly PanelButton _btnMarkAll;
+    private readonly PanelButton _btnFindAll;
+    private readonly PanelButton _btnFindAllTabs;
     private readonly Label _statusLabel;
-    private readonly Button _btnClose;
+    private readonly PanelButton _btnClose;
 
     // ── Controls: Replace row ─────────────────────────────────────────
     private readonly TextBox _replaceBox;
-    private readonly Button _btnReplace;
-    private readonly Button _btnReplaceAll;
-    private readonly Button _btnExpandReplace;
+    private readonly PanelButton _btnReplace;
+    private readonly PanelButton _btnReplaceAll;
+    private readonly PanelButton _btnExpandReplace;
     private readonly Panel _replaceRow;
 
     // ── State ─────────────────────────────────────────────────────────
@@ -57,6 +60,19 @@ public class FindReplacePanel : UserControl
     private EditorControl? _editor;
     private PieceTable? _buffer;
     private ITheme? _theme;
+
+    // ── Theme cache ───────────────────────────────────────────────────
+    private Color _panelBg;
+    private Color _panelFg;
+    private Color _inputBg;
+    private Color _buttonBg;
+    private Color _buttonFg;
+    private Color _buttonHoverBg;
+    private Color _buttonBorderColor;
+    private Color _toggleActiveBg;
+    private Color _toggleActiveBorder;
+    private Color _toggleActiveFg;
+    private Color _borderColor;
 
     // ── Events ────────────────────────────────────────────────────────
 
@@ -105,13 +121,13 @@ public class FindReplacePanel : UserControl
 
         // ── Toggle buttons ────────────────────────────────────────────
         _btnMatchCase = CreateToggleButton("Aa", "Match Case");
-        _btnMatchCase.Click += (_, _) => { _matchCase = !_matchCase; UpdateToggleAppearance(_btnMatchCase, _matchCase); RunIncrementalSearch(); };
+        _btnMatchCase.Click += (_, _) => { _matchCase = !_matchCase; _btnMatchCase.IsActive = _matchCase; RunIncrementalSearch(); };
 
         _btnWholeWord = CreateToggleButton("W", "Whole Word");
-        _btnWholeWord.Click += (_, _) => { _wholeWord = !_wholeWord; UpdateToggleAppearance(_btnWholeWord, _wholeWord); RunIncrementalSearch(); };
+        _btnWholeWord.Click += (_, _) => { _wholeWord = !_wholeWord; _btnWholeWord.IsActive = _wholeWord; RunIncrementalSearch(); };
 
         _btnRegex = CreateToggleButton(".*", "Use Regular Expression");
-        _btnRegex.Click += (_, _) => { _useRegex = !_useRegex; UpdateToggleAppearance(_btnRegex, _useRegex); RunIncrementalSearch(); };
+        _btnRegex.Click += (_, _) => { _useRegex = !_useRegex; _btnRegex.IsActive = _useRegex; RunIncrementalSearch(); };
 
         // ── Action buttons ────────────────────────────────────────────
         _btnFindPrev = CreateIconButton("\u25C0", "Find Previous");
@@ -381,14 +397,21 @@ public class FindReplacePanel : UserControl
 
     public void ReplaceCurrent()
     {
-        if (_buffer is null || _currentMatches.Count == 0 || _currentMatchIndex < 0)
+        if (_editor is null || _buffer is null || _currentMatches.Count == 0 || _currentMatchIndex < 0)
             return;
 
         if (_currentMatchIndex >= _currentMatches.Count) return;
 
         SearchResult match = _currentMatches[_currentMatchIndex];
         SearchOptions options = BuildSearchOptions(searchUp: false);
-        _searchEngine.Replace(_buffer, match, _replaceBox.Text, options);
+
+        // Expand regex backreferences if needed, then replace through the command system.
+        string matchedText = _buffer.GetText(match.Offset, match.Length);
+        string expanded = options.UseRegex
+            ? SearchEngine.BuildPattern(options).Replace(matchedText, _replaceBox.Text)
+            : _replaceBox.Text;
+
+        _editor.ReplaceRange(match.Offset, match.Length, expanded);
 
         RunIncrementalSearch();
         FindNext();
@@ -396,13 +419,35 @@ public class FindReplacePanel : UserControl
 
     public void ReplaceAll()
     {
-        if (_buffer is null || string.IsNullOrEmpty(_searchBox.Text)) return;
+        if (_editor is null || _buffer is null || string.IsNullOrEmpty(_searchBox.Text)) return;
 
         SearchOptions options = BuildSearchOptions(searchUp: false);
-        int count = _searchEngine.ReplaceAll(_buffer, _replaceBox.Text, options);
+        List<SearchResult> matches = _searchEngine.FindAll(_buffer, options);
+        if (matches.Count == 0)
+        {
+            _statusLabel.Text = "0 occurrences";
+            return;
+        }
+
+        Regex? regex = options.UseRegex ? SearchEngine.BuildPattern(options) : null;
+
+        // Build replacements in reverse document order so offsets stay valid.
+        var replacements = new List<(long Offset, long Length, string Replacement)>(matches.Count);
+        for (int i = matches.Count - 1; i >= 0; i--)
+        {
+            SearchResult m = matches[i];
+            string actual = _buffer.GetText(m.Offset, m.Length);
+            string expanded = regex is not null
+                ? regex.Replace(actual, _replaceBox.Text)
+                : _replaceBox.Text;
+            replacements.Add((m.Offset, m.Length, expanded));
+        }
+
+        _editor.ReplaceAllRanges(replacements);
+
         _currentMatches.Clear();
         _currentMatchIndex = -1;
-        _statusLabel.Text = $"Replaced {count} occurrence{(count == 1 ? "" : "s")}";
+        _statusLabel.Text = $"Replaced {matches.Count} occurrence{(matches.Count == 1 ? "" : "s")}";
     }
 
     public void ClosePanel()
@@ -418,6 +463,50 @@ public class FindReplacePanel : UserControl
 
     private void OnSearchBoxKeyDown(object? sender, KeyEventArgs e)
     {
+        // Handle standard edit shortcuts explicitly so they aren't
+        // routed to the editor control by the form's KeyPreview.
+        if (e.Control && !e.Shift && !e.Alt && sender is ComboBox cb)
+        {
+            switch (e.KeyCode)
+            {
+                case Keys.V:
+                    if (Clipboard.ContainsText())
+                    {
+                        string clip = Clipboard.GetText();
+                        int sel = cb.SelectionStart;
+                        int len = cb.SelectionLength;
+                        string txt = cb.Text;
+                        cb.Text = txt[..sel] + clip + txt[(sel + len)..];
+                        cb.SelectionStart = sel + clip.Length;
+                    }
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+                case Keys.C:
+                    if (cb.SelectionLength > 0)
+                        Clipboard.SetText(cb.Text.Substring(cb.SelectionStart, cb.SelectionLength));
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+                case Keys.X:
+                    if (cb.SelectionLength > 0)
+                    {
+                        Clipboard.SetText(cb.Text.Substring(cb.SelectionStart, cb.SelectionLength));
+                        int sel2 = cb.SelectionStart;
+                        cb.Text = cb.Text[..sel2] + cb.Text[(sel2 + cb.SelectionLength)..];
+                        cb.SelectionStart = sel2;
+                    }
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+                case Keys.A:
+                    cb.SelectAll();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+            }
+        }
+
         switch (e.KeyCode)
         {
             case Keys.Enter when e.Shift:
@@ -439,6 +528,35 @@ public class FindReplacePanel : UserControl
 
     private void OnReplaceBoxKeyDown(object? sender, KeyEventArgs e)
     {
+        // Handle standard edit shortcuts explicitly so they aren't
+        // routed to the editor control by the form's KeyPreview.
+        if (e.Control && !e.Shift && !e.Alt && sender is TextBox tb)
+        {
+            switch (e.KeyCode)
+            {
+                case Keys.V:
+                    tb.Paste();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+                case Keys.C:
+                    tb.Copy();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+                case Keys.X:
+                    tb.Cut();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+                case Keys.A:
+                    tb.SelectAll();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+            }
+        }
+
         switch (e.KeyCode)
         {
             case Keys.Enter:
@@ -526,7 +644,7 @@ public class FindReplacePanel : UserControl
         _searchHistory.Remove(text);
         _searchHistory.Insert(0, text);
 
-        if (_searchHistory.Count > MaxHistoryItems)
+        if (_searchHistory.Count > ConfigMaxHistoryItems)
             _searchHistory.RemoveAt(_searchHistory.Count - 1);
 
         _searchBox.BeginUpdate();
@@ -726,18 +844,15 @@ public class FindReplacePanel : UserControl
         base.OnPaint(e);
 
         var g = e.Graphics;
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
 
-        // Draw rounded border + shadow.
-        Color borderColor = _theme is not null
-            ? Lighten(_theme.FindPanelBackground, 40)
-            : Color.FromArgb(80, 80, 80);
-        Color shadowColor = Color.FromArgb(40, 0, 0, 0);
-
+        // Draw shadow.
+        Color shadowColor = Color.FromArgb(30, 0, 0, 0);
         using var shadowPen = new Pen(shadowColor, 1);
         g.DrawRectangle(shadowPen, 0, 0, Width - 1, Height - 1);
 
-        using var borderPen = new Pen(borderColor, 1);
+        // Draw border.
+        using var borderPen = new Pen(_borderColor, 1);
         g.DrawRectangle(borderPen, 1, 0, Width - 3, Height - 2);
     }
 
@@ -747,42 +862,78 @@ public class FindReplacePanel : UserControl
     {
         if (_theme is null) return;
 
-        BackColor = _theme.FindPanelBackground;
-        ForeColor = _theme.FindPanelForeground;
+        // Compute palette from theme.
+        _panelBg = _theme.FindPanelBackground;
+        _panelFg = _theme.FindPanelForeground;
+        _inputBg = Lighten(_panelBg, 15);
+        _buttonBg = _panelBg;
+        _buttonFg = _panelFg;
+        _buttonHoverBg = Lighten(_panelBg, 20);
+        _buttonBorderColor = Color.FromArgb(50, _panelFg);
+        _borderColor = Lighten(_panelBg, 40);
+
+        // Toggle active colours — use the status bar accent for active toggles.
+        _toggleActiveBg = Color.FromArgb(60, _theme.StatusBarBackground.R,
+            _theme.StatusBarBackground.G, _theme.StatusBarBackground.B);
+        _toggleActiveBorder = _theme.StatusBarBackground;
+        _toggleActiveFg = _panelFg;
+
+        BackColor = _panelBg;
+        ForeColor = _panelFg;
 
         // Input boxes.
-        Color inputBg = Lighten(_theme.FindPanelBackground, 15);
-        _searchBox.BackColor = inputBg;
-        _searchBox.ForeColor = _theme.FindPanelForeground;
-        _replaceBox.BackColor = inputBg;
-        _replaceBox.ForeColor = _theme.FindPanelForeground;
-        _statusLabel.ForeColor = Color.FromArgb(160, _theme.FindPanelForeground);
+        _searchBox.BackColor = _inputBg;
+        _searchBox.ForeColor = _panelFg;
+        _replaceBox.BackColor = _inputBg;
+        _replaceBox.ForeColor = _panelFg;
+        _statusLabel.ForeColor = Color.FromArgb(160, _panelFg);
+        _statusLabel.BackColor = _panelBg;
 
-        // Button styling.
-        Color btnBg = Lighten(_theme.FindPanelBackground, 8);
-        Color btnFg = _theme.FindPanelForeground;
-        Color btnBorder = Lighten(_theme.FindPanelBackground, 25);
-        Color hoverBg = Lighten(btnBg, 15);
-        Color pressBg = Lighten(btnBg, 25);
+        // Apply to all buttons.
+        ApplyButtonTheme(_btnMatchCase);
+        ApplyButtonTheme(_btnWholeWord);
+        ApplyButtonTheme(_btnRegex);
+        ApplyButtonTheme(_btnFindPrev);
+        ApplyButtonTheme(_btnFindNext);
+        ApplyButtonTheme(_btnCount);
+        ApplyButtonTheme(_btnMarkAll);
+        ApplyButtonTheme(_btnFindAll);
+        ApplyButtonTheme(_btnFindAllTabs);
+        ApplyButtonTheme(_btnClose);
+        ApplyButtonTheme(_btnExpandReplace);
+        ApplyButtonTheme(_btnReplace);
+        ApplyButtonTheme(_btnReplaceAll);
 
-        foreach (Control c in GetAllButtons(this))
+        // Flow panels.
+        foreach (Control c in Controls)
         {
-            if (c is Button btn)
-            {
-                btn.BackColor = btnBg;
-                btn.ForeColor = btnFg;
-                btn.FlatAppearance.BorderColor = btnBorder;
-                btn.FlatAppearance.MouseOverBackColor = hoverBg;
-                btn.FlatAppearance.MouseDownBackColor = pressBg;
-            }
+            if (c is FlowLayoutPanel flow)
+                flow.BackColor = _panelBg;
+            if (c is Panel panel)
+                panel.BackColor = _panelBg;
         }
 
-        // Re-apply toggle states.
-        UpdateToggleAppearance(_btnMatchCase, _matchCase);
-        UpdateToggleAppearance(_btnWholeWord, _wholeWord);
-        UpdateToggleAppearance(_btnRegex, _useRegex);
+        // Recurse into replace row children.
+        foreach (Control c in _replaceRow.Controls)
+        {
+            if (c is FlowLayoutPanel flow)
+                flow.BackColor = _panelBg;
+        }
 
         Invalidate(true);
+    }
+
+    private void ApplyButtonTheme(PanelButton btn)
+    {
+        btn.NormalBg = _buttonBg;
+        btn.HoverBg = _buttonHoverBg;
+        btn.ForeColor = _buttonFg;
+        btn.BackColor = _panelBg;
+        btn.BorderColor = _buttonBorderColor;
+        btn.ActiveBg = _toggleActiveBg;
+        btn.ActiveBorder = _toggleActiveBorder;
+        btn.ActiveFg = _toggleActiveFg;
+        btn.Invalidate();
     }
 
     private static Color Lighten(Color c, int amount)
@@ -793,31 +944,20 @@ public class FindReplacePanel : UserControl
             Math.Min(255, c.B + amount));
     }
 
-    private static IEnumerable<Control> GetAllButtons(Control parent)
-    {
-        foreach (Control c in parent.Controls)
-        {
-            if (c is Button) yield return c;
-            foreach (Control child in GetAllButtons(c))
-                yield return child;
-        }
-    }
-
     // ── Control factory helpers ───────────────────────────────────────
 
-    private static Button CreateToggleButton(string text, string tooltip)
+    private static PanelButton CreateToggleButton(string text, string tooltip)
     {
-        var btn = new Button
+        var btn = new PanelButton
         {
             Text = text,
             Width = 32,
             Height = 28,
-            FlatStyle = FlatStyle.Flat,
             Margin = new Padding(1, 1, 1, 1),
             Font = new Font("Segoe UI", 9f, FontStyle.Bold),
             Cursor = Cursors.Hand,
+            ButtonMode = PanelButtonMode.Toggle,
         };
-        btn.FlatAppearance.BorderSize = 1;
 
         var tt = new ToolTip { InitialDelay = 400 };
         tt.SetToolTip(btn, tooltip);
@@ -825,35 +965,18 @@ public class FindReplacePanel : UserControl
         return btn;
     }
 
-    private static void UpdateToggleAppearance(Button btn, bool active)
+    private static PanelButton CreateIconButton(string text, string tooltip)
     {
-        if (active)
-        {
-            btn.BackColor = Color.FromArgb(40, 80, 140);
-            btn.FlatAppearance.BorderColor = Color.FromArgb(70, 120, 190);
-            btn.ForeColor = Color.FromArgb(230, 230, 230);
-        }
-        else
-        {
-            btn.BackColor = Color.FromArgb(55, 55, 60);
-            btn.FlatAppearance.BorderColor = Color.FromArgb(75, 75, 80);
-            btn.ForeColor = Color.FromArgb(170, 170, 170);
-        }
-    }
-
-    private static Button CreateIconButton(string text, string tooltip)
-    {
-        var btn = new Button
+        var btn = new PanelButton
         {
             Text = text,
             Width = 32,
             Height = 28,
-            FlatStyle = FlatStyle.Flat,
             Margin = new Padding(1, 1, 1, 1),
             Font = new Font("Segoe UI", 9.5f),
             Cursor = Cursors.Hand,
+            ButtonMode = PanelButtonMode.Icon,
         };
-        btn.FlatAppearance.BorderSize = 0;
 
         var tt = new ToolTip { InitialDelay = 400 };
         tt.SetToolTip(btn, tooltip);
@@ -861,20 +984,19 @@ public class FindReplacePanel : UserControl
         return btn;
     }
 
-    private static Button CreateTextButton(string text, string tooltip)
+    private static PanelButton CreateTextButton(string text, string tooltip)
     {
-        var btn = new Button
+        var btn = new PanelButton
         {
             Text = text,
             AutoSize = true,
             Height = 26,
-            FlatStyle = FlatStyle.Flat,
             Margin = new Padding(2, 1, 2, 1),
             Padding = new Padding(8, 2, 8, 2),
             Font = new Font("Segoe UI", 8.5f),
             Cursor = Cursors.Hand,
+            ButtonMode = PanelButtonMode.Text,
         };
-        btn.FlatAppearance.BorderSize = 1;
 
         var tt = new ToolTip { InitialDelay = 400 };
         tt.SetToolTip(btn, tooltip);
@@ -895,6 +1017,200 @@ public class FindReplacePanel : UserControl
                 Parent.Resize -= OnParentResize;
         }
         base.Dispose(disposing);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  Owner-drawn button control
+    // ══════════════════════════════════════════════════════════════════
+
+    private enum PanelButtonMode { Icon, Toggle, Text }
+
+    /// <summary>
+    /// A lightweight owner-drawn button with rounded corners, hover effect,
+    /// and optional toggle state. Used for all buttons in the find/replace panel.
+    /// </summary>
+    private sealed class PanelButton : Control
+    {
+        private bool _hovered;
+        private bool _pressed;
+        private bool _isActive;
+
+        public PanelButtonMode ButtonMode { get; set; } = PanelButtonMode.Icon;
+
+        public Color NormalBg { get; set; } = Color.Transparent;
+        public Color HoverBg { get; set; } = Color.FromArgb(50, 128, 128, 128);
+        public Color BorderColor { get; set; } = Color.FromArgb(60, 128, 128, 128);
+
+        // Toggle-specific colours.
+        public Color ActiveBg { get; set; } = Color.FromArgb(40, 80, 140);
+        public Color ActiveBorder { get; set; } = Color.FromArgb(70, 120, 190);
+        public Color ActiveFg { get; set; } = Color.White;
+
+        public bool IsActive
+        {
+            get => _isActive;
+            set { _isActive = value; Invalidate(); }
+        }
+
+        public PanelButton()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor |
+                     ControlStyles.StandardClick | ControlStyles.StandardDoubleClick, true);
+            BackColor = Color.Transparent;
+        }
+
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            // Compute size based on text + padding so AutoSize works.
+            var textSize = TextRenderer.MeasureText(Text, Font);
+            int hPad = ButtonMode == PanelButtonMode.Text ? Padding.Horizontal + 16 : 8;
+            int vPad = 4;
+            return new Size(textSize.Width + hPad, Math.Max(Height, textSize.Height + vPad));
+        }
+
+        protected override void OnTextChanged(EventArgs e)
+        {
+            base.OnTextChanged(e);
+            if (AutoSize)
+            {
+                var pref = GetPreferredSize(Size.Empty);
+                Width = pref.Width;
+            }
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            var rect = new Rectangle(0, 0, Width - 1, Height - 1);
+            int radius = ButtonMode == PanelButtonMode.Icon ? 3 : 4;
+
+            // Determine background colour.
+            Color bg;
+            Color fg;
+            bool showBorder;
+
+            if (ButtonMode == PanelButtonMode.Toggle && _isActive)
+            {
+                bg = _pressed ? Darken(ActiveBg, 10)
+                   : _hovered ? Lighten(ActiveBg, 10)
+                   : ActiveBg;
+                fg = ActiveFg;
+                showBorder = true;
+            }
+            else
+            {
+                bg = !Enabled ? NormalBg
+                   : _pressed ? Color.FromArgb(Math.Min(HoverBg.A + 40, 255), HoverBg.R, HoverBg.G, HoverBg.B)
+                   : _hovered ? HoverBg
+                   : NormalBg;
+                fg = Enabled ? ForeColor : Color.FromArgb(100, ForeColor);
+                showBorder = (_hovered || _pressed) && ButtonMode != PanelButtonMode.Icon;
+            }
+
+            // Draw background.
+            using var path = CreateRoundedRect(rect, radius);
+            using var brush = new SolidBrush(bg);
+            g.FillPath(brush, path);
+
+            // Draw border.
+            if (showBorder || (ButtonMode == PanelButtonMode.Toggle && _isActive))
+            {
+                Color borderCol = (_isActive && ButtonMode == PanelButtonMode.Toggle)
+                    ? ActiveBorder
+                    : BorderColor;
+                using var pen = new Pen(borderCol);
+                g.DrawPath(pen, path);
+            }
+
+            // For text mode, show a subtle border always (even when not hovered).
+            if (ButtonMode == PanelButtonMode.Text && !_hovered && !_pressed)
+            {
+                using var subtlePen = new Pen(Color.FromArgb(30, BorderColor.R, BorderColor.G, BorderColor.B));
+                g.DrawPath(subtlePen, path);
+            }
+
+            // For icon buttons, show a subtle hover-only rounded bg.
+            if (ButtonMode == PanelButtonMode.Icon && _hovered && !_pressed)
+            {
+                using var hoverPen = new Pen(Color.FromArgb(40, BorderColor.R, BorderColor.G, BorderColor.B));
+                g.DrawPath(hoverPen, path);
+            }
+
+            // Active toggle indicator — coloured bottom bar.
+            if (ButtonMode == PanelButtonMode.Toggle && _isActive)
+            {
+                int barY = Height - 3;
+                int barInset = 4;
+                using var barBrush = new SolidBrush(ActiveBorder);
+                g.FillRectangle(barBrush, barInset, barY, Width - barInset * 2, 2);
+            }
+
+            // Draw text.
+            TextRenderer.DrawText(g, Text, Font, rect, fg,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hovered = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hovered = false;
+            _pressed = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            _pressed = true;
+            Invalidate();
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            _pressed = false;
+            Invalidate();
+            base.OnMouseUp(e);
+        }
+
+        private static GraphicsPath CreateRoundedRect(Rectangle rect, int radius)
+        {
+            var path = new GraphicsPath();
+            int d = radius * 2;
+            path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+            path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+            path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+            path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        private static Color Lighten(Color c, int amount)
+        {
+            return Color.FromArgb(c.A,
+                Math.Min(255, c.R + amount),
+                Math.Min(255, c.G + amount),
+                Math.Min(255, c.B + amount));
+        }
+
+        private static Color Darken(Color c, int amount)
+        {
+            return Color.FromArgb(c.A,
+                Math.Max(0, c.R - amount),
+                Math.Max(0, c.G - amount),
+                Math.Max(0, c.B - amount));
+        }
     }
 }
 

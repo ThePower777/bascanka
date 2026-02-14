@@ -56,6 +56,13 @@ static class Program
                 continue;
             }
 
+            if (string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase))
+            {
+                SettingsManager.ClearSessionState();
+                continue;
+            }
+
             if (arg.StartsWith('-'))
                 continue;
 

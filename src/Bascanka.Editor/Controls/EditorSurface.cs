@@ -1,7 +1,9 @@
 using System.Drawing;
 using Bascanka.Core.Buffer;
+using Bascanka.Core.Diff;
 using Bascanka.Core.Search;
 using Bascanka.Core.Syntax;
+using Bascanka.Editor.Highlighting;
 using Bascanka.Editor.Themes;
 
 namespace Bascanka.Editor.Controls;
@@ -16,15 +18,15 @@ public sealed class EditorSurface : Control
 {
     private static readonly TextFormatFlags DrawFlags =
         TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix |
-        TextFormatFlags.PreserveGraphicsClipping;
+        TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.SingleLine;
 
     /// <summary>Horizontal padding in pixels between the gutter and text content.</summary>
-    private const int TextLeftPadding = 6;
+    private static int TextLeftPadding => EditorControl.DefaultTextLeftPadding;
 
     private PieceTable? _document;
     private Font _editorFont;
     private ITheme _theme;
-    private int _tabSize = 4;
+    private int _tabSize = EditorControl.DefaultTabWidth;
     private bool _wordWrap;
     private bool _showWhitespace;
 
@@ -60,7 +62,7 @@ public sealed class EditorSurface : Control
             ControlStyles.Selectable,
             true);
 
-        _editorFont = new Font("Consolas", 11f, FontStyle.Regular, GraphicsUnit.Point);
+        _editorFont = new Font(EditorControl.DefaultFontFamily, EditorControl.DefaultFontSize, FontStyle.Regular, GraphicsUnit.Point);
         _theme = new DarkTheme();
 
         BackColor = _theme.EditorBackground;
@@ -154,9 +156,18 @@ public sealed class EditorSurface : Control
     {
         if (!_wordWrap || _document is null || docLine >= _document.LineCount)
             return 1;
+        int wrapCols = WrapColumns;
+
+        // Fast path: use character count directly for long lines.
+        // Avoids fetching the full line text and calling ExpandTabs.
+        // Exact for tab-free text (JSON, most long lines); may undercount
+        // slightly for lines with many tabs, which is acceptable.
+        long len = _document.GetLineLength(docLine);
+        if (len > wrapCols * 4)
+            return Math.Max(1, (int)((len + wrapCols - 1) / wrapCols));
+
         string lineText = _document.GetLine(docLine);
         string expanded = ExpandTabs(lineText);
-        int wrapCols = WrapColumns;
         return Math.Max(1, (expanded.Length + wrapCols - 1) / wrapCols);
     }
 
@@ -190,6 +201,119 @@ public sealed class EditorSurface : Control
     /// </summary>
     public System.Text.RegularExpressions.Regex? SearchHighlightPattern { get; set; }
 
+    /// <summary>
+    /// Per-line diff metadata for diff view mode. When set, diff background
+    /// colours are rendered behind text lines.
+    /// </summary>
+    public DiffLine[]? DiffLineMarkers { get; set; }
+
+    /// <summary>
+    /// Custom highlighting matcher for user-defined regex-based coloring.
+    /// When set, custom highlighting is used instead of syntax tokens.
+    /// </summary>
+    public CustomHighlightMatcher? CustomHighlightMatcher { get; set; }
+
+    /// <summary>
+    /// Pre-computed block regions for custom highlighting.
+    /// When set, block background/foreground colors are rendered behind text.
+    /// </summary>
+    public IReadOnlyList<BlockRegion>? CustomBlockRegions { get; set; }
+
+    // ────────────────────────────────────────────────────────────────────
+    //  Word-wrap row mapping
+    // ────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the total number of visual rows across all visible document lines
+    /// when word-wrap is enabled. Falls back to document/visible line count otherwise.
+    /// </summary>
+    internal long GetTotalWrapRows()
+    {
+        if (!_wordWrap || _document is null)
+        {
+            long lineCount = _document?.LineCount ?? 0;
+            return _folding is not null ? _folding.GetVisibleLineCount(lineCount) : lineCount;
+        }
+
+        long total = 0;
+        long docLines = _document.LineCount;
+        int wrapCols = WrapColumns;
+
+        for (long line = 0; line < docLines; line++)
+        {
+            if (_folding is not null && !_folding.IsLineVisible(line))
+                continue;
+
+            // Fast path: use line length to check if wrapping is needed.
+            // GetLineLength is O(1) with cached offsets; avoids string allocation.
+            long len = _document.GetLineLength(line);
+            if (len <= wrapCols)
+            {
+                total += 1;
+            }
+            else
+            {
+                total += GetWrapRowCount(line);
+            }
+        }
+
+        return Math.Max(1, total);
+    }
+
+    /// <summary>
+    /// Maps a global wrap-row index to the document line and offset within that line's wrap rows.
+    /// </summary>
+    internal (long DocLine, int WrapRowOffset) WrapRowToDocumentLine(long wrapRow)
+    {
+        if (_document is null) return (0, 0);
+
+        long docLines = _document.LineCount;
+        int wrapCols = WrapColumns;
+        long accumulated = 0;
+
+        for (long line = 0; line < docLines; line++)
+        {
+            if (_folding is not null && !_folding.IsLineVisible(line))
+                continue;
+
+            long len = _document.GetLineLength(line);
+            int rows = len <= wrapCols ? 1 : GetWrapRowCount(line);
+
+            if (accumulated + rows > wrapRow)
+                return (line, (int)(wrapRow - accumulated));
+
+            accumulated += rows;
+        }
+
+        return (Math.Max(0, docLines - 1), 0);
+    }
+
+    /// <summary>
+    /// Maps a document line and wrap-row offset within that line to a global wrap-row index.
+    /// </summary>
+    internal long DocumentLineToWrapRow(long docLine, int wrapRowOffset = 0)
+    {
+        if (_document is null) return 0;
+
+        long docLines = _document.LineCount;
+        int wrapCols = WrapColumns;
+        long accumulated = 0;
+
+        for (long line = 0; line < docLines; line++)
+        {
+            if (_folding is not null && !_folding.IsLineVisible(line))
+                continue;
+
+            if (line == docLine)
+                return accumulated + wrapRowOffset;
+
+            long len = _document.GetLineLength(line);
+            accumulated += len <= wrapCols ? 1 : GetWrapRowCount(line);
+        }
+
+        return accumulated;
+    }
+
     // ────────────────────────────────────────────────────────────────────
     //  Font metrics
     // ────────────────────────────────────────────────────────────────────
@@ -200,7 +324,7 @@ public sealed class EditorSurface : Control
         Size size = TextRenderer.MeasureText(g, "M", _editorFont, Size.Empty,
             TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         _charWidth = Math.Max(1, size.Width);
-        _lineHeight = Math.Max(1, size.Height + 2);
+        _lineHeight = Math.Max(1, size.Height + EditorControl.DefaultLineSpacing);
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -226,19 +350,53 @@ public sealed class EditorSurface : Control
         // ── Pass 1: Determine which document lines are visible ──────────
         int entryCount = 0;
         long minDocLine = long.MaxValue, maxDocLine = long.MinValue;
-        var docLines = new long[visibleCount];
+        var docLines = new long[visibleCount + 1];
 
-        for (int i = 0; i < visibleCount; i++)
+        // When word-wrap is on, firstVisible is a wrap-row index.
+        // Map it to the starting document line and the wrap-row offset within that line.
+        int firstLineWrapOffset = 0;
+        if (_wordWrap)
         {
-            long docLine = _folding is not null
-                ? _folding.VisibleLineToDocumentLine(firstVisible + i)
-                : firstVisible + i;
+            var (startDocLine, wrapOff) = WrapRowToDocumentLine(firstVisible);
+            firstLineWrapOffset = wrapOff;
 
-            if (docLine >= totalDocLines) break;
+            // Collect document lines that contribute wrap rows to the visible area.
+            int wrapRowsBudget = visibleCount;
+            int wrapCols0 = WrapColumns;
+            for (long dl = startDocLine; dl < totalDocLines && wrapRowsBudget > 0; dl++)
+            {
+                if (_folding is not null && !_folding.IsLineVisible(dl))
+                    continue;
 
-            docLines[entryCount++] = docLine;
-            if (docLine < minDocLine) minDocLine = docLine;
-            if (docLine > maxDocLine) maxDocLine = docLine;
+                docLines[entryCount++] = dl;
+                if (dl < minDocLine) minDocLine = dl;
+                if (dl > maxDocLine) maxDocLine = dl;
+
+                // Use GetLineLength for O(1) row count (avoids fetching full line text).
+                long lineLen = _document.GetLineLength(dl);
+                int rows = lineLen <= wrapCols0 ? 1
+                    : Math.Max(1, (int)((lineLen + wrapCols0 - 1) / wrapCols0));
+                // For the first line, only remaining rows after the offset count.
+                int usedRows = (dl == startDocLine) ? rows - wrapOff : rows;
+                wrapRowsBudget -= usedRows;
+
+                if (entryCount >= docLines.Length) break;
+            }
+        }
+        else
+        {
+            for (int i = 0; i < visibleCount; i++)
+            {
+                long docLine = _folding is not null
+                    ? _folding.VisibleLineToDocumentLine(firstVisible + i)
+                    : firstVisible + i;
+
+                if (docLine >= totalDocLines) break;
+
+                docLines[entryCount++] = docLine;
+                if (docLine < minDocLine) minDocLine = docLine;
+                if (docLine > maxDocLine) maxDocLine = docLine;
+            }
         }
 
         if (entryCount == 0)
@@ -268,12 +426,79 @@ public sealed class EditorSurface : Control
 
             if (_wordWrap)
             {
-                string expanded = ExpandTabs(lineText);
                 int wrapCols = WrapColumns;
-                int rowsForLine = Math.Max(1, (expanded.Length + wrapCols - 1) / wrapCols);
+                // Determine which wrap row to start rendering from within this line.
+                int startRow = (i == 0) ? firstLineWrapOffset : 0;
+
+                // For very long lines, window the text around the visible area
+                // to avoid ExpandTabs / rendering on millions of characters.
+                int charsPerScreen = (VisibleLineCount + 4) * wrapCols;
+                string wrapText;
+                int charClipStart = 0;
+                int expandedClipStart = 0;
+
+                if (lineText.Length > charsPerScreen * 2)
+                {
+                    // Approximate character position for startRow.
+                    // For tab-free text (typical JSON) this is exact.
+                    charClipStart = Math.Min(startRow * wrapCols, lineText.Length);
+                    int charClipEnd = Math.Min(charClipStart + charsPerScreen, lineText.Length);
+                    wrapText = lineText.Substring(charClipStart, charClipEnd - charClipStart);
+                    expandedClipStart = startRow * wrapCols;
+                    startRow = 0; // the clipped text starts at the row we want
+                }
+                else
+                {
+                    wrapText = lineText;
+                }
+
+                string expanded = ExpandTabs(wrapText);
+                int rowsForClip = Math.Max(1, (expanded.Length + wrapCols - 1) / wrapCols);
                 List<Token>? tokens = _tokenCache?.GetCachedTokens(docLine);
 
-                for (int row = 0; row < rowsForLine; row++)
+                // Filter and shift tokens into the clipped window.
+                if (tokens is not null && tokens.Count > 0 && wrapText.Length < lineText.Length)
+                {
+                    var adjusted = new List<Token>();
+                    int clipEnd = charClipStart + wrapText.Length;
+                    foreach (var t in tokens)
+                    {
+                        if (t.End <= charClipStart || t.Start >= clipEnd) continue;
+                        int aS = Math.Max(0, t.Start - charClipStart);
+                        int aE = Math.Min(wrapText.Length, t.End - charClipStart);
+                        adjusted.Add(new Token(aS, aE - aS, t.Type));
+                    }
+                    tokens = adjusted;
+                }
+
+                // Evaluate custom highlighting once per line (before the row loop).
+                CustomLineResult? wrapCustomResult = null;
+                if (CustomHighlightMatcher is not null)
+                    wrapCustomResult = CustomHighlightMatcher.MatchLine(wrapText);
+
+                // Compute block state once per document line.
+                Color wrapBlockFg = Color.Empty;
+                BlockRegion? wrapBlock = null;
+                if (CustomBlockRegions is not null && CustomBlockRegions.Count > 0)
+                    wrapBlock = Highlighting.CustomHighlightMatcher.GetBlockForLine(CustomBlockRegions, docLine);
+                if (wrapBlock.HasValue)
+                    wrapBlockFg = wrapBlock.Value.Foreground;
+
+                // Apply block foreground fallback for wrap path.
+                if (wrapBlockFg != Color.Empty)
+                {
+                    if (wrapCustomResult.HasValue && wrapCustomResult.Value.LineForeground == Color.Empty)
+                        wrapCustomResult = new CustomLineResult
+                        {
+                            LineBackground = wrapCustomResult.Value.LineBackground,
+                            LineForeground = wrapBlockFg,
+                            Spans = wrapCustomResult.Value.Spans,
+                        };
+                    else if (!wrapCustomResult.HasValue)
+                        wrapCustomResult = new CustomLineResult { LineForeground = wrapBlockFg };
+                }
+
+                for (int row = startRow; row < rowsForClip; row++)
                 {
                     int y = visualRow * _lineHeight;
                     if (y > ClientSize.Height) break;
@@ -281,20 +506,47 @@ public sealed class EditorSurface : Control
                     int segStart = row * wrapCols;
                     int segLen = Math.Min(wrapCols, expanded.Length - segStart);
 
+                    // Block background (lowest priority — painted first per row).
+                    if (wrapBlock.HasValue && wrapBlock.Value.Background != Color.Empty)
+                    {
+                        using var blockBgBrush = new SolidBrush(wrapBlock.Value.Background);
+                        g.FillRectangle(blockBgBrush, 0, y, ClientSize.Width, _lineHeight);
+                    }
+
                     // Highlight current line (all wrap rows).
                     if (docLine == caretLine)
                         g.FillRectangle(hlBrush, 0, y, ClientSize.Width, _lineHeight);
 
+                    // Render diff background (if in diff mode).
+                    if (DiffLineMarkers is not null && row == startRow && firstLineWrapOffset == 0)
+                        RenderDiffBackground(g, docLine, y, 0, lineText);
+
+                    // Custom line background (fills entire visual row).
+                    if (wrapCustomResult.HasValue && wrapCustomResult.Value.LineBackground != Color.Empty)
+                    {
+                        using var customBgBrush = new SolidBrush(wrapCustomResult.Value.LineBackground);
+                        g.FillRectangle(customBgBrush, 0, y, ClientSize.Width, _lineHeight);
+                    }
+
+                    // Paint match-rule span backgrounds BEFORE selection.
+                    if (wrapCustomResult.HasValue)
+                        RenderCustomSpanBackgroundsWrap(g, wrapText, expanded, segStart, segLen, y, wrapCustomResult.Value);
+
                     // Selection for this wrap segment.
+                    // Map segment positions back to original line coordinates.
+                    int origSegStart = segStart + expandedClipStart;
+                    int origSegLen = segLen;
                     RenderWrapSelectionBackground(g, lineStartOffset, lineText,
-                        segStart, segLen, y, selBrush);
+                        origSegStart, origSegLen, y, selBrush);
 
                     // Text rendering.
                     if (segLen > 0)
                     {
                         string segment = expanded.Substring(segStart, segLen);
-                        if (tokens is not null && tokens.Count > 0)
-                            RenderTokenizedWrapSegment(g, lineText, expanded, tokens, segStart, segLen, y);
+                        if (wrapCustomResult.HasValue)
+                            RenderCustomHighlightedWrapSegment(g, wrapText, expanded, segStart, segLen, y, wrapCustomResult.Value);
+                        else if (tokens is not null && tokens.Count > 0)
+                            RenderTokenizedWrapSegment(g, wrapText, expanded, tokens, segStart, segLen, y);
                         else
                             TextRenderer.DrawText(g, segment, _editorFont,
                                 new Point(TextLeftPadding, y), _theme.EditorForeground, DrawFlags);
@@ -303,8 +555,8 @@ public sealed class EditorSurface : Control
                     // Render whitespace glyphs if enabled.
                     if (_showWhitespace)
                     {
-                        bool isLastSegment = (row == rowsForLine - 1);
-                        RenderWhitespaceWrap(g, lineText, expanded, segStart, segLen, y,
+                        bool isLastSegment = (row == rowsForClip - 1) && (charClipStart + wrapText.Length >= lineText.Length);
+                        RenderWhitespaceWrap(g, wrapText, expanded, segStart, segLen, y,
                             docLine == totalDocLines - 1, isLastSegment);
                     }
 
@@ -315,37 +567,131 @@ public sealed class EditorSurface : Control
             {
                 int y = visualRow * _lineHeight;
 
+                // For extremely long lines, extract a window around the
+                // visible columns instead of processing millions of chars.
+                // All rendering methods use ExpandedColumn which, for
+                // tab-free text (typical for long lines), equals the char
+                // index. Using renderHOffset = hOffset - clipStart makes
+                // all position math work transparently.
+                string renderText = lineText;
+                int clipStart = 0;
+                int renderHOffset = hOffset;
+                long renderLineStart = lineStartOffset;
+                int visibleWindow = MaxVisibleColumns + 500;
+
+                if (lineText.Length > visibleWindow * 2)
+                {
+                    clipStart = Math.Clamp(hOffset - 200, 0, lineText.Length);
+                    int clipEnd = Math.Clamp(hOffset + visibleWindow, clipStart, lineText.Length);
+                    renderText = lineText.Substring(clipStart, clipEnd - clipStart);
+                    renderHOffset = hOffset - clipStart;
+                    renderLineStart = lineStartOffset + clipStart;
+                }
+
+                // Block background (lowest priority — painted first).
+                Color blockFg = Color.Empty;
+                if (CustomBlockRegions is not null && CustomBlockRegions.Count > 0)
+                {
+                    var block = Highlighting.CustomHighlightMatcher.GetBlockForLine(CustomBlockRegions, docLine);
+                    if (block.HasValue)
+                    {
+                        blockFg = block.Value.Foreground;
+                        if (block.Value.Background != Color.Empty)
+                        {
+                            using var blockBgBrush = new SolidBrush(block.Value.Background);
+                            g.FillRectangle(blockBgBrush, 0, y, ClientSize.Width, _lineHeight);
+                        }
+                    }
+                }
+
                 // Highlight current line.
                 if (docLine == caretLine)
                     g.FillRectangle(hlBrush, 0, y, ClientSize.Width, _lineHeight);
 
+                // Render diff background (if in diff mode).
+                if (DiffLineMarkers is not null)
+                    RenderDiffBackground(g, docLine, y, renderHOffset, renderText);
+
+                // Custom highlighting: evaluate rules for this line.
+                CustomLineResult? customResult = null;
+                if (CustomHighlightMatcher is not null)
+                {
+                    customResult = CustomHighlightMatcher.MatchLine(renderText);
+                    if (customResult.Value.LineBackground != Color.Empty)
+                    {
+                        using var customBgBrush = new SolidBrush(customResult.Value.LineBackground);
+                        g.FillRectangle(customBgBrush, 0, y, ClientSize.Width, _lineHeight);
+                    }
+                    // Paint match-rule span backgrounds BEFORE selection so
+                    // selection is visible on top.
+                    RenderCustomSpanBackgrounds(g, renderText, y, renderHOffset, customResult.Value);
+                }
+
+                // Apply block foreground fallback when no line-rule foreground is set.
+                if (blockFg != Color.Empty)
+                {
+                    if (customResult.HasValue && customResult.Value.LineForeground == Color.Empty)
+                        customResult = new CustomLineResult
+                        {
+                            LineBackground = customResult.Value.LineBackground,
+                            LineForeground = blockFg,
+                            Spans = customResult.Value.Spans,
+                        };
+                    else if (!customResult.HasValue)
+                        customResult = new CustomLineResult { LineForeground = blockFg };
+                }
+
                 // Render search match highlights for this line.
-                RenderMatchHighlights(g, lineText, y, hOffset, matchBrush);
+                RenderMatchHighlights(g, renderText, y, renderHOffset, matchBrush);
 
                 // Render selection background for this line.
-                RenderSelectionBackground(g, lineText, lineStartOffset, y, hOffset, selBrush);
+                RenderSelectionBackground(g, renderText, renderLineStart, y, renderHOffset, selBrush);
 
                 // Render column selection background for this line.
-                RenderColumnSelectionBackground(g, lineText, docLine, y, hOffset, selBrush);
+                RenderColumnSelectionBackground(g, renderText, docLine, y, renderHOffset, selBrush);
 
-                // Get tokens for syntax highlighting.
-                List<Token>? tokens = _tokenCache?.GetCachedTokens(docLine);
-
-                if (tokens is not null && tokens.Count > 0)
-                    RenderTokenizedLine(g, lineText, tokens, y, hOffset);
+                if (customResult.HasValue)
+                {
+                    RenderCustomHighlightedLine(g, renderText, y, renderHOffset, customResult.Value);
+                }
                 else
-                    RenderPlainLine(g, lineText, y, hOffset);
+                {
+                    // Get tokens for syntax highlighting.
+                    List<Token>? tokens = _tokenCache?.GetCachedTokens(docLine);
+
+                    // When the line was clipped, filter and shift tokens into the window.
+                    if (tokens is not null && tokens.Count > 0 && renderText.Length < lineText.Length)
+                    {
+                        var adjusted = new List<Token>();
+                        int clipEnd = clipStart + renderText.Length;
+                        foreach (var t in tokens)
+                        {
+                            if (t.End <= clipStart || t.Start >= clipEnd) continue;
+                            int adjS = Math.Max(0, t.Start - clipStart);
+                            int adjE = Math.Min(renderText.Length, t.End - clipStart);
+                            adjusted.Add(new Token(adjS, adjE - adjS, t.Type));
+                        }
+                        tokens = adjusted;
+                    }
+
+                    if (tokens is not null && tokens.Count > 0)
+                        RenderTokenizedLine(g, renderText, tokens, y, renderHOffset);
+                    else
+                        RenderPlainLine(g, renderText, y, renderHOffset);
+                }
 
                 // Render whitespace glyphs if enabled.
                 if (_showWhitespace)
-                    RenderWhitespace(g, lineText, y, hOffset, docLine == totalDocLines - 1);
+                    RenderWhitespace(g, renderText, y, renderHOffset, docLine == totalDocLines - 1);
 
                 // Render fold ellipsis indicator if next lines are collapsed.
                 if (_folding is not null && _folding.IsFoldStart(docLine) && _folding.IsCollapsed(docLine))
                 {
-                    int textEndX = ExpandTabs(lineText).Length * _charWidth - hOffset * _charWidth + TextLeftPadding;
+                    // Use original line length for fold ellipsis position.
+                    int textEndCol = lineText.Length;
+                    int textEndX = textEndCol * _charWidth - hOffset * _charWidth + TextLeftPadding;
                     string indicator = " ... ";
-                    using var bgBrush = new SolidBrush(Color.FromArgb(60, 128, 128, 128));
+                    using var bgBrush = new SolidBrush(Color.FromArgb(EditorControl.DefaultFoldIndicatorOpacity, 128, 128, 128));
                     int indicatorWidth = indicator.Length * _charWidth;
                     g.FillRectangle(bgBrush, textEndX + 4, y, indicatorWidth, _lineHeight);
                     TextRenderer.DrawText(g, indicator, _editorFont,
@@ -358,7 +704,7 @@ public sealed class EditorSurface : Control
 
         // Render caret.
         if (_wordWrap)
-            RenderCaretWrapped(g, firstVisible, lineData, minDocLine, docLines, entryCount);
+            RenderCaretWrapped(g, firstVisible, firstLineWrapOffset, lineData, minDocLine, docLines, entryCount);
         else
             RenderCaret(g, firstVisible, hOffset);
     }
@@ -407,6 +753,190 @@ public sealed class EditorSurface : Control
             TextRenderer.DrawText(g, fragment, _editorFont,
                 new Point(x, y), color, DrawFlags);
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    //  Custom highlighting rendering
+    // ────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Paints match-rule span backgrounds only (no text).
+    /// Called BEFORE selection so selection draws on top.
+    /// </summary>
+    private void RenderCustomSpanBackgrounds(Graphics g, string lineText, int y, int hOffset, CustomLineResult result)
+    {
+        if (result.Spans is null or { Count: 0 }) return;
+
+        int startCol = hOffset;
+        int endCol = Math.Min(hOffset + MaxVisibleColumns + 1, ExpandTabs(lineText).Length);
+
+        foreach (var span in result.Spans)
+        {
+            if (span.Background == Color.Empty) continue;
+            int expStart = ExpandedColumn(lineText, span.Start);
+            int expEnd = ExpandedColumn(lineText, span.Start + span.Length);
+            int drawStart = Math.Max(expStart, startCol);
+            int drawEnd = Math.Min(expEnd, endCol);
+            if (drawStart >= drawEnd) continue;
+
+            int x = (drawStart - hOffset) * _charWidth + TextLeftPadding;
+            int w = (drawEnd - drawStart) * _charWidth;
+            using var bgBrush = new SolidBrush(span.Background);
+            g.FillRectangle(bgBrush, x, y, w, _lineHeight);
+        }
+    }
+
+    /// <summary>
+    /// Paints match-rule span backgrounds for a word-wrap segment (no text).
+    /// Called BEFORE selection so selection draws on top.
+    /// </summary>
+    private void RenderCustomSpanBackgroundsWrap(Graphics g, string lineText, string expanded,
+        int segStart, int segLen, int y, CustomLineResult result)
+    {
+        if (result.Spans is null or { Count: 0 }) return;
+        int segEnd = segStart + segLen;
+
+        foreach (var span in result.Spans)
+        {
+            if (span.Background == Color.Empty) continue;
+            int expStart = ExpandedColumn(lineText, span.Start);
+            int expEnd = ExpandedColumn(lineText, span.Start + span.Length);
+            int drawStart = Math.Max(expStart, segStart);
+            int drawEnd = Math.Min(expEnd, segEnd);
+            if (drawStart >= drawEnd) continue;
+
+            int x = (drawStart - segStart) * _charWidth + TextLeftPadding;
+            int w = (drawEnd - drawStart) * _charWidth;
+            using var bgBrush = new SolidBrush(span.Background);
+            g.FillRectangle(bgBrush, x, y, w, _lineHeight);
+        }
+    }
+
+    /// <summary>
+    /// Renders custom-highlighted text (foreground only — backgrounds are
+    /// already painted by <see cref="RenderCustomSpanBackgrounds"/>).
+    /// </summary>
+    private void RenderCustomHighlightedLine(Graphics g, string lineText, int y, int hOffset, CustomLineResult result)
+    {
+        string expanded = ExpandTabs(lineText);
+        int startCol = hOffset;
+        int endCol = Math.Min(hOffset + MaxVisibleColumns + 1, expanded.Length);
+        if (startCol >= expanded.Length) return;
+
+        Color defaultFg = result.LineForeground != Color.Empty
+            ? result.LineForeground : _theme.EditorForeground;
+
+        if (result.Spans is null or { Count: 0 })
+        {
+            string visible = expanded.Substring(startCol, endCol - startCol);
+            TextRenderer.DrawText(g, visible, _editorFont,
+                new Point(TextLeftPadding, y), defaultFg, DrawFlags);
+            return;
+        }
+
+        // Build expanded-column spans from raw-char spans.
+        var expandedSpans = new List<(int Start, int End, Color Fg)>(result.Spans.Count);
+        foreach (var span in result.Spans)
+        {
+            int expStart = ExpandedColumn(lineText, span.Start);
+            int expEnd = ExpandedColumn(lineText, span.Start + span.Length);
+            if (expEnd <= startCol || expStart >= endCol) continue;
+            expandedSpans.Add((expStart, expEnd, span.Foreground));
+        }
+
+        // Render text segment-by-segment: gaps in default fg, spans in their fg.
+        int cursor = startCol;
+        foreach (var (spanStart, spanEnd, spanFg) in expandedSpans)
+        {
+            if (cursor < spanStart)
+                RenderTextSegment(g, expanded, cursor, Math.Min(spanStart, endCol), hOffset, y, defaultFg);
+
+            int drawStart = Math.Max(cursor, spanStart);
+            int drawEnd = Math.Min(spanEnd, endCol);
+            if (drawStart < drawEnd)
+            {
+                Color fg = spanFg != Color.Empty ? spanFg : defaultFg;
+                RenderTextSegment(g, expanded, drawStart, drawEnd, hOffset, y, fg);
+            }
+
+            cursor = Math.Max(cursor, spanEnd);
+        }
+
+        if (cursor < endCol)
+            RenderTextSegment(g, expanded, cursor, endCol, hOffset, y, defaultFg);
+    }
+
+    /// <summary>
+    /// Renders custom-highlighted text for a word-wrap segment (foreground only).
+    /// </summary>
+    private void RenderCustomHighlightedWrapSegment(Graphics g, string lineText, string expanded,
+        int segStart, int segLen, int y, CustomLineResult result)
+    {
+        int segEnd = segStart + segLen;
+
+        Color defaultFg = result.LineForeground != Color.Empty
+            ? result.LineForeground : _theme.EditorForeground;
+
+        if (result.Spans is null or { Count: 0 })
+        {
+            string segment = expanded.Substring(segStart, segLen);
+            TextRenderer.DrawText(g, segment, _editorFont,
+                new Point(TextLeftPadding, y), defaultFg, DrawFlags);
+            return;
+        }
+
+        // Build expanded-column spans clipped to this segment.
+        var expandedSpans = new List<(int Start, int End, Color Fg)>(result.Spans.Count);
+        foreach (var span in result.Spans)
+        {
+            int expStart = ExpandedColumn(lineText, span.Start);
+            int expEnd = ExpandedColumn(lineText, span.Start + span.Length);
+            if (expEnd <= segStart || expStart >= segEnd) continue;
+            expandedSpans.Add((expStart, expEnd, span.Foreground));
+        }
+
+        int cursor = segStart;
+        foreach (var (spanStart, spanEnd, spanFg) in expandedSpans)
+        {
+            if (cursor < spanStart && cursor < segEnd)
+            {
+                int gapEnd = Math.Min(spanStart, segEnd);
+                string fragment = expanded.Substring(cursor, gapEnd - cursor);
+                int x = (cursor - segStart) * _charWidth + TextLeftPadding;
+                TextRenderer.DrawText(g, fragment, _editorFont, new Point(x, y), defaultFg, DrawFlags);
+            }
+
+            int drawStart = Math.Max(cursor, spanStart);
+            int drawEnd = Math.Min(spanEnd, segEnd);
+            if (drawStart < drawEnd)
+            {
+                string fragment = expanded.Substring(drawStart, drawEnd - drawStart);
+                int x = (drawStart - segStart) * _charWidth + TextLeftPadding;
+                Color fg = spanFg != Color.Empty ? spanFg : defaultFg;
+                TextRenderer.DrawText(g, fragment, _editorFont, new Point(x, y), fg, DrawFlags);
+            }
+
+            cursor = Math.Max(cursor, spanEnd);
+        }
+
+        if (cursor < segEnd)
+        {
+            string fragment = expanded.Substring(cursor, segEnd - cursor);
+            int x = (cursor - segStart) * _charWidth + TextLeftPadding;
+            TextRenderer.DrawText(g, fragment, _editorFont, new Point(x, y), defaultFg, DrawFlags);
+        }
+    }
+
+    private void RenderTextSegment(Graphics g, string expanded, int colStart, int colEnd,
+        int hOffset, int y, Color fgColor)
+    {
+        if (colStart >= colEnd || colStart >= expanded.Length) return;
+
+        int drawEnd = Math.Min(colEnd, expanded.Length);
+        string fragment = expanded.Substring(colStart, drawEnd - colStart);
+        int x = (colStart - hOffset) * _charWidth + TextLeftPadding;
+
+        TextRenderer.DrawText(g, fragment, _editorFont, new Point(x, y), fgColor, DrawFlags);
     }
 
     private void RenderSelectionBackground(Graphics g, string lineText, long lineStartOffset, int y, int hOffset, Brush selBrush)
@@ -469,6 +999,45 @@ public sealed class EditorSurface : Control
             int x2 = Math.Max(x1, expandedEnd * _charWidth + TextLeftPadding);
 
             g.FillRectangle(matchBrush, x1, y, x2 - x1, _lineHeight);
+        }
+    }
+
+    private void RenderDiffBackground(Graphics g, long docLine, int y, int hOffset, string lineText)
+    {
+        if (DiffLineMarkers is null || docLine < 0 || docLine >= DiffLineMarkers.Length)
+            return;
+
+        DiffLine marker = DiffLineMarkers[docLine];
+        Color? bgColor = marker.Type switch
+        {
+            DiffLineType.Added    => _theme.DiffAddedBackground,
+            DiffLineType.Removed  => _theme.DiffRemovedBackground,
+            DiffLineType.Modified => _theme.DiffModifiedBackground,
+            DiffLineType.Padding  => _theme.DiffPaddingBackground,
+            _ => null,
+        };
+
+        if (bgColor.HasValue)
+        {
+            using var brush = new SolidBrush(bgColor.Value);
+            g.FillRectangle(brush, 0, y, ClientSize.Width, _lineHeight);
+        }
+
+        // Character-level highlights.
+        if (marker.CharDiffs is { Count: > 0 })
+        {
+            using var charBrush = new SolidBrush(_theme.DiffModifiedCharBackground);
+            foreach (var range in marker.CharDiffs)
+            {
+                int startCol = ExpandedColumn(lineText, Math.Min(range.Start, lineText.Length));
+                int endCol = ExpandedColumn(lineText, Math.Min(range.Start + range.Length, lineText.Length));
+
+                int x1 = (startCol - hOffset) * _charWidth + TextLeftPadding;
+                int x2 = (endCol - hOffset) * _charWidth + TextLeftPadding;
+
+                if (x2 > x1 && x2 > 0)
+                    g.FillRectangle(charBrush, Math.Max(0, x1), y, x2 - Math.Max(0, x1), _lineHeight);
+            }
         }
     }
 
@@ -573,6 +1142,7 @@ public sealed class EditorSurface : Control
     }
 
     private void RenderCaretWrapped(Graphics g, long firstVisibleLine,
+        int firstLineWrapOffset,
         (string Text, long StartOffset)[] lineData, long minDocLine,
         long[] docLines, int entryCount)
     {
@@ -595,8 +1165,13 @@ public sealed class EditorSurface : Control
             }
 
             string lineText = lineData[dataIndex].Text;
-            string expanded = ExpandTabs(lineText);
-            int rowsForLine = Math.Max(1, (expanded.Length + wrapCols - 1) / wrapCols);
+            int startRow = (i == 0) ? firstLineWrapOffset : 0;
+
+            // For very long lines, compute wrap row from the caret's expanded column
+            // without ExpandTabs on the full line.
+            int expandedLineLen = lineText.Length; // approximate for tab-free text
+            int rowsForLine = Math.Max(1, (expandedLineLen + wrapCols - 1) / wrapCols);
+            int renderedRows = rowsForLine - startRow;
 
             if (docLine == caretLine)
             {
@@ -604,7 +1179,10 @@ public sealed class EditorSurface : Control
                 int wrapRow = wrapCols > 0 ? expandedCol / wrapCols : 0;
                 int colInRow = expandedCol - wrapRow * wrapCols;
 
-                int y = (visualRow + wrapRow) * _lineHeight;
+                // The caret's wrap row relative to the first rendered row.
+                int caretVisualRow = visualRow + wrapRow - startRow;
+
+                int y = caretVisualRow * _lineHeight;
                 int x = colInRow * _charWidth + TextLeftPadding;
 
                 if (y >= 0 && y <= ClientSize.Height)
@@ -615,7 +1193,7 @@ public sealed class EditorSurface : Control
                 return;
             }
 
-            visualRow += rowsForLine;
+            visualRow += renderedRows;
         }
     }
 
@@ -631,7 +1209,7 @@ public sealed class EditorSurface : Control
     {
         if (!_showWhitespace) return;
 
-        var wsColor = Color.FromArgb(100,
+        var wsColor = Color.FromArgb(EditorControl.DefaultWhitespaceOpacity,
             _theme.EditorForeground.R,
             _theme.EditorForeground.G,
             _theme.EditorForeground.B);
@@ -694,7 +1272,7 @@ public sealed class EditorSurface : Control
     {
         if (!_showWhitespace) return;
 
-        var wsColor = Color.FromArgb(100,
+        var wsColor = Color.FromArgb(EditorControl.DefaultWhitespaceOpacity,
             _theme.EditorForeground.R,
             _theme.EditorForeground.G,
             _theme.EditorForeground.B);
@@ -1023,23 +1601,31 @@ public sealed class EditorSurface : Control
         int wrapCols = WrapColumns;
         long totalDocLines = _document!.LineCount;
 
-        int visualRow = 0;
-        for (long docLine = firstVisible; docLine < totalDocLines; docLine++)
-        {
-            string lineText = _document.GetLine(docLine);
-            string expanded = ExpandTabs(lineText);
-            int rowsForLine = Math.Max(1, (expanded.Length + wrapCols - 1) / wrapCols);
+        // firstVisible is a wrap-row index. Map to starting document line.
+        var (startDocLine, wrapOff) = WrapRowToDocumentLine(firstVisible);
 
-            if (targetRow < visualRow + rowsForLine)
+        int visualRow = 0;
+        for (long docLine = startDocLine; docLine < totalDocLines; docLine++)
+        {
+            if (_folding is not null && !_folding.IsLineVisible(docLine))
+                continue;
+
+            string lineText = _document.GetLine(docLine);
+            int lineLen = lineText.Length; // approximate expanded length for tab-free text
+            int rowsForLine = Math.Max(1, (lineLen + wrapCols - 1) / wrapCols);
+            int startRow = (docLine == startDocLine) ? wrapOff : 0;
+            int renderedRows = rowsForLine - startRow;
+
+            if (targetRow < visualRow + renderedRows)
             {
-                int wrapRow = targetRow - visualRow;
+                int wrapRow = startRow + (targetRow - visualRow);
                 int expandedCol = wrapRow * wrapCols + (_charWidth > 0 ? Math.Max(0, x - TextLeftPadding) / _charWidth : 0);
-                expandedCol = Math.Min(expandedCol, expanded.Length);
+                expandedCol = Math.Min(expandedCol, lineLen);
                 int col = CompressedColumn(lineText, expandedCol);
                 return (docLine, col);
             }
 
-            visualRow += rowsForLine;
+            visualRow += renderedRows;
         }
 
         // Past end of document.

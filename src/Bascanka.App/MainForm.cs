@@ -1,11 +1,13 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using Bascanka.Core.Buffer;
+using Bascanka.Core.Diff;
 using Bascanka.Core.Encoding;
 using Bascanka.Core.IO;
 using Bascanka.Core.Search;
 using Bascanka.Core.Syntax;
 using Bascanka.Editor.Controls;
+using Bascanka.Editor.Diff;
 using Bascanka.Editor.Panels;
 using Bascanka.Editor.Tabs;
 using Bascanka.Editor.Themes;
@@ -42,10 +44,12 @@ public sealed class MainForm : Form
     private readonly FileWatcher _fileWatcher;
     private readonly PluginHost _pluginHost;
     private readonly KeyboardShortcutManager _shortcutManager;
+    private readonly CustomHighlightStore _customHighlightStore;
 
     // ── Document state ───────────────────────────────────────────────
     private readonly List<TabInfo> _tabs = new();
     private int _activeTabIndex = -1;
+    private int _deferredInsertIndex = -1;
     private int _untitledCounter;
     private bool _isFullScreen;
     private FormWindowState _previousWindowState;
@@ -69,6 +73,15 @@ public sealed class MainForm : Form
         _initialFiles = filesToOpen ?? Array.Empty<string>();
         _singleInstance = singleInstance;
 
+        // Restore saved theme before any controls are created.
+        string savedTheme = SettingsManager.GetString(SettingsManager.KeyTheme);
+        if (!string.IsNullOrEmpty(savedTheme))
+            ThemeManager.Instance.SetTheme(savedTheme);
+
+        // Load all persisted settings into static properties.
+        LoadAllSettings();
+        ApplyThemeOverridesFromRegistry();
+
         // ── Form properties ──────────────────────────────────────────
         Text = Strings.AppTitle;
         Size = new Size(1200, 800);
@@ -85,7 +98,7 @@ public sealed class MainForm : Form
 
         // ── Create layout controls ───────────────────────────────────
         _menuStrip = new MenuStrip { Dock = DockStyle.Top };
-        _tabStrip = new TabStrip { Dock = DockStyle.Top, Height = 30 };
+        _tabStrip = new TabStrip { Dock = DockStyle.Top };
         _statusStrip = new StatusStrip { Dock = DockStyle.Bottom };
 
         _sidePanel = new Panel
@@ -169,6 +182,8 @@ public sealed class MainForm : Form
         _recentFilesManager = new RecentFilesManager();
         _fileWatcher = new FileWatcher(this);
         _pluginHost = new PluginHost(this);
+        _customHighlightStore = new CustomHighlightStore();
+        _customHighlightStore.Load();
         _menuBuilder = new MenuBuilder();
 
         // Build the main menu (wires all menu items).
@@ -178,6 +193,9 @@ public sealed class MainForm : Form
 
         // Apply localized texts to controls in the Editor layer.
         ApplyLocalizedMenuTexts();
+
+        // Restore window geometry from previous session (before OnLoad).
+        _sessionManager.RestoreWindowState(this);
 
         // Rebuild the entire UI when the user switches language.
         LocalizationManager.LanguageChanged += OnUILanguageChanged;
@@ -380,6 +398,10 @@ public sealed class MainForm : Form
             _fileWatcher.Watch(tab);
             _pluginHost.RaiseDocumentOpened(path);
         }
+        catch (UnauthorizedAccessException)
+        {
+            OfferAdminElevation(path);
+        }
         catch (Exception ex)
         {
             MessageBox.Show(
@@ -485,24 +507,86 @@ public sealed class MainForm : Form
     {
         if (index < 0 || index >= _tabs.Count) return;
 
-        // Hide current editor.
+        // Hide current editor and custom views.
         if (_activeTabIndex >= 0 && _activeTabIndex < _tabs.Count)
         {
-            _tabs[_activeTabIndex].Editor.Visible = false;
+            var prevTab = _tabs[_activeTabIndex];
+            prevTab.Editor.Visible = false;
+            if (prevTab.Tag is DiffViewControl prevDiff)
+                prevDiff.Visible = false;
+            else if (prevTab.Tag is SedPreviewControl prevSed)
+                prevSed.Visible = false;
         }
 
         _activeTabIndex = index;
         TabInfo tab = _tabs[index];
 
-        // Show and dock the editor.
+        // Ensure the editor is parented and sized before loading content.
+        // The Document setter calls UpdateScrollBars() and Invalidate()
+        // which need a properly sized surface to produce correct results.
         if (!_editorPanel.Controls.Contains(tab.Editor))
         {
             tab.Editor.Dock = DockStyle.Fill;
             _editorPanel.Controls.Add(tab.Editor);
         }
 
-        tab.Editor.Visible = true;
-        tab.Editor.Focus();
+        // ── Deferred loading: load the file on first activation ───
+        if (tab.IsDeferredLoad && tab.FilePath is not null)
+        {
+            LoadDeferredTab(tab);
+
+            // LoadDeferredTab may replace this tab (large/binary files):
+            // it removes the placeholder from _tabs and calls OpenFile,
+            // which creates a new tab and activates it recursively.
+            // If so, bail out — the new tab is already active.
+            if (!_tabs.Contains(tab))
+            {
+                // Remove the placeholder editor we just parented above.
+                if (_editorPanel.Controls.Contains(tab.Editor))
+                    _editorPanel.Controls.Remove(tab.Editor);
+                return;
+            }
+        }
+
+        // If this is a diff tab, show the diff view instead of the editor.
+        if (tab.Tag is DiffViewControl diffView)
+        {
+            tab.Editor.Visible = false;
+            if (!_editorPanel.Controls.Contains(diffView))
+            {
+                diffView.Dock = DockStyle.Fill;
+                _editorPanel.Controls.Add(diffView);
+            }
+            diffView.Visible = true;
+            diffView.BringToFront();
+            diffView.Focus();
+        }
+        else if (tab.Tag is SedPreviewControl sedView)
+        {
+            tab.Editor.Visible = false;
+            if (!_editorPanel.Controls.Contains(sedView))
+            {
+                sedView.Dock = DockStyle.Fill;
+                _editorPanel.Controls.Add(sedView);
+            }
+            sedView.Visible = true;
+            sedView.BringToFront();
+            sedView.Focus();
+        }
+        else
+        {
+            tab.Editor.Visible = true;
+            tab.Editor.BringToFront();
+            tab.Editor.Focus();
+        }
+
+        // ── Apply pending state (zoom/scroll/caret from session) ──
+        ApplyPendingTabState(tab);
+
+        // Force a full refresh after the message pump processes pending
+        // layout.  Without this, a deferred tab shown for the first time
+        // may render blank because WinForms hasn't finished sizing.
+        BeginInvoke(() => tab.Editor.ActivateAndRefresh());
 
         _tabStrip.SetActiveTab(index);
         UpdateTitleBar();
@@ -605,6 +689,47 @@ public sealed class MainForm : Form
         _menuBuilder.RefreshLanguageMenu(this);
     }
 
+    // ── Custom Highlighting ─────────────────────────────────────────
+
+    /// <summary>The loaded custom highlight profiles.</summary>
+    public IReadOnlyList<Editor.Highlighting.CustomHighlightProfile> CustomHighlightProfiles
+        => _customHighlightStore.Profiles;
+
+    /// <summary>Activates a custom highlight profile by name on the active tab.</summary>
+    public void SetCustomHighlightProfile(string name)
+    {
+        TabInfo? tab = ActiveTab;
+        if (tab is null) return;
+
+        var profile = _customHighlightStore.FindByName(name);
+        if (profile is not null)
+            tab.Editor.SetCustomHighlighting(profile);
+
+        UpdateStatusBar();
+        _menuBuilder.RefreshLanguageMenu(this);
+    }
+
+    /// <summary>Opens the custom highlighting manager dialog.</summary>
+    public void ShowCustomHighlightManager()
+    {
+        using var dialog = new CustomHighlightManagerDialog(
+            _customHighlightStore,
+            ThemeManager.Instance.CurrentTheme);
+
+        dialog.ShowDialog(this);
+
+        // Refresh active tab if it uses a custom profile.
+        TabInfo? tab = ActiveTab;
+        if (tab?.Editor.CustomProfileName is not null)
+        {
+            var profile = _customHighlightStore.FindByName(tab.Editor.CustomProfileName);
+            tab.Editor.SetCustomHighlighting(profile); // null clears it if deleted
+        }
+
+        UpdateStatusBar();
+        _menuBuilder.RefreshLanguageMenu(this);
+    }
+
     /// <summary>
     /// Sets the encoding for the active document.
     /// </summary>
@@ -645,6 +770,20 @@ public sealed class MainForm : Form
         => ActiveTab?.Editor.TransformDocument(transform);
 
     /// <summary>
+    /// Applies a transformation to the selection if present, otherwise to the entire document.
+    /// </summary>
+    public void TransformSelectionOrDocument(Func<string, string> transform)
+    {
+        var editor = ActiveTab?.Editor;
+        if (editor is null) return;
+
+        if (editor.SelectionLength > 0)
+            editor.TransformSelection(transform);
+        else
+            editor.TransformDocument(transform);
+    }
+
+    /// <summary>
     /// Toggles word wrap in the active editor.
     /// </summary>
     public void ToggleWordWrap()
@@ -652,6 +791,7 @@ public sealed class MainForm : Form
         if (ActiveTab is not null)
         {
             ActiveTab.Editor.WordWrap = !ActiveTab.Editor.WordWrap;
+            SettingsManager.SetBool(SettingsManager.KeyWordWrap, ActiveTab.Editor.WordWrap);
             _menuBuilder.UpdateMenuState(this);
         }
     }
@@ -664,6 +804,7 @@ public sealed class MainForm : Form
         if (ActiveTab is not null)
         {
             ActiveTab.Editor.ShowWhitespace = !ActiveTab.Editor.ShowWhitespace;
+            SettingsManager.SetBool(SettingsManager.KeyShowWhitespace, ActiveTab.Editor.ShowWhitespace);
             _menuBuilder.UpdateMenuState(this);
         }
     }
@@ -676,6 +817,7 @@ public sealed class MainForm : Form
         if (ActiveTab is not null)
         {
             ActiveTab.Editor.ShowLineNumbers = !ActiveTab.Editor.ShowLineNumbers;
+            SettingsManager.SetBool(SettingsManager.KeyShowLineNumbers, ActiveTab.Editor.ShowLineNumbers);
             _menuBuilder.UpdateMenuState(this);
         }
     }
@@ -686,6 +828,10 @@ public sealed class MainForm : Form
     public void ZoomIn() => ActiveTab?.Editor.ZoomIn();
     public void ZoomOut() => ActiveTab?.Editor.ZoomOut();
     public void ResetZoom() => ActiveTab?.Editor.ResetZoom();
+
+    public void ToggleFoldAtCaret() => ActiveTab?.Editor.ToggleFoldAtCaret();
+    public void FoldAll() => ActiveTab?.Editor.FoldAll();
+    public void UnfoldAll() => ActiveTab?.Editor.UnfoldAll();
 
     /// <summary>
     /// Toggles the symbol list side panel.
@@ -945,7 +1091,106 @@ public sealed class MainForm : Form
     public void ShowSettings()
     {
         using var dlg = new SettingsForm();
-        dlg.ShowDialog(this);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        // Re-read all settings and apply to static properties and open editors.
+        LoadAllSettings();
+
+        // Read desired theme name before applying overrides, because the
+        // ThemeChanged handler writes the *current* theme name back to the
+        // registry, which would overwrite the user's choice.
+        string themeName = SettingsManager.GetString(SettingsManager.KeyTheme, "Dark");
+        ApplyThemeOverridesFromRegistry();
+        try { ThemeManager.Instance.SetTheme(themeName); } catch { }
+
+        // Apply to all open editors.
+        foreach (var tab in _tabs)
+            tab.Editor.ApplySettings();
+
+        // Refresh tab strip with new dimensions.
+        _tabStrip.Height = TabStrip.ConfigTabHeight;
+        _tabStrip.Invalidate();
+    }
+
+    /// <summary>
+    /// Reads theme colour overrides from the registry and applies them via ThemeManager.
+    /// </summary>
+    private static void ApplyThemeOverridesFromRegistry()
+    {
+        foreach (string themeName in ThemeManager.Instance.ThemeNames)
+        {
+            string? json = SettingsManager.GetThemeOverrides(themeName);
+            if (json is null)
+            {
+                ThemeManager.Instance.ApplyOverrides(themeName, null);
+                continue;
+            }
+
+            var overrides = ParseThemeOverridesJson(json);
+            ThemeManager.Instance.ApplyOverrides(themeName, overrides.Count > 0 ? overrides : null);
+        }
+    }
+
+    /// <summary>
+    /// Parses a JSON string of theme colour overrides into a dictionary.
+    /// </summary>
+    private static Dictionary<string, Color> ParseThemeOverridesJson(string json)
+    {
+        var result = new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    try
+                    {
+                        result[prop.Name] = ColorTranslator.FromHtml(prop.Value.GetString()!);
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+        return result;
+    }
+
+    /// <summary>
+    /// Reads all persisted settings from the registry and applies them to
+    /// static properties on EditorControl, TabStrip, FindReplacePanel, etc.
+    /// </summary>
+    private static void LoadAllSettings()
+    {
+        // Editor
+        EditorControl.DefaultFontFamily = SettingsManager.GetString(SettingsManager.KeyFontFamily, "Consolas");
+        EditorControl.DefaultFontSize = SettingsManager.GetInt(SettingsManager.KeyFontSize, 11);
+        EditorControl.DefaultTabWidth = SettingsManager.GetInt(SettingsManager.KeyTabWidth, 4);
+        EditorControl.DefaultScrollSpeed = SettingsManager.GetInt(SettingsManager.KeyScrollSpeed, 3);
+        EditorControl.DefaultAutoIndent = SettingsManager.GetBool(SettingsManager.KeyAutoIndent, true);
+        EditorControl.DefaultCaretScrollBuffer = SettingsManager.GetInt(SettingsManager.KeyCaretScrollBuffer, 4);
+
+        // Display
+        EditorControl.DefaultCaretBlinkRate = SettingsManager.GetInt(SettingsManager.KeyCaretBlinkRate, 500);
+        EditorControl.DefaultTextLeftPadding = SettingsManager.GetInt(SettingsManager.KeyTextLeftPadding, 6);
+        EditorControl.DefaultLineSpacing = SettingsManager.GetInt(SettingsManager.KeyLineSpacing, 2);
+        EditorControl.DefaultMinZoomFontSize = SettingsManager.GetInt(SettingsManager.KeyMinZoomFontSize, 6);
+        EditorControl.DefaultWhitespaceOpacity = SettingsManager.GetInt(SettingsManager.KeyWhitespaceOpacity, 100);
+        EditorControl.DefaultFoldIndicatorOpacity = SettingsManager.GetInt(SettingsManager.KeyFoldIndicatorOpacity, 60);
+        EditorControl.DefaultGutterPaddingLeft = SettingsManager.GetInt(SettingsManager.KeyGutterPaddingLeft, 8);
+        EditorControl.DefaultGutterPaddingRight = SettingsManager.GetInt(SettingsManager.KeyGutterPaddingRight, 12);
+        EditorControl.DefaultFoldButtonSize = SettingsManager.GetInt(SettingsManager.KeyFoldButtonSize, 10);
+        EditorControl.DefaultBookmarkSize = SettingsManager.GetInt(SettingsManager.KeyBookmarkSize, 8);
+        TabStrip.ConfigTabHeight = SettingsManager.GetInt(SettingsManager.KeyTabHeight, 30);
+        TabStrip.ConfigMaxTabWidth = SettingsManager.GetInt(SettingsManager.KeyMaxTabWidth, 220);
+        TabStrip.ConfigMinTabWidth = SettingsManager.GetInt(SettingsManager.KeyMinTabWidth, 80);
+
+        // Performance
+        LargeFileThreshold = (long)SettingsManager.GetInt(SettingsManager.KeyLargeFileThresholdMB, 10) * 1024 * 1024;
+        EditorControl.FoldingMaxFileSize = (long)SettingsManager.GetInt(SettingsManager.KeyFoldingMaxFileSizeMB, 50) * 1_000_000;
+        RecentFilesManager.MaxRecentFiles = SettingsManager.GetInt(SettingsManager.KeyMaxRecentFiles, 20);
+        FindReplacePanel.ConfigMaxHistoryItems = SettingsManager.GetInt(SettingsManager.KeySearchHistoryLimit, 25);
+        EditorControl.DefaultSearchDebounce = SettingsManager.GetInt(SettingsManager.KeySearchDebounce, 300);
     }
 
     /// <summary>
@@ -1093,7 +1338,10 @@ public sealed class MainForm : Form
         // Apply theme to the form.
         ApplyTheme(ThemeManager.Instance.CurrentTheme);
         ThemeManager.Instance.ThemeChanged += (_, _) =>
+        {
             ApplyTheme(ThemeManager.Instance.CurrentTheme);
+            SettingsManager.SetString(SettingsManager.KeyTheme, ThemeManager.Instance.CurrentTheme.Name);
+        };
 
         // Open files from command line.
         if (_initialFiles.Length > 0)
@@ -1141,6 +1389,21 @@ public sealed class MainForm : Form
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetFocus();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    private const int WM_CUT   = 0x0300;
+    private const int WM_COPY  = 0x0301;
+    private const int WM_PASTE = 0x0302;
+    private const int EM_SETSEL = 0x00B1;
+    private const int WM_UNDO  = 0x0304;
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -1193,6 +1456,47 @@ public sealed class MainForm : Form
         _singleInstance?.Dispose();
     }
 
+    /// <summary>
+    /// Intercepts command keys before the menu system processes them.
+    /// When a TextBox or ComboBox has focus, standard edit shortcuts
+    /// (Ctrl+V/C/X/A/Z) are sent directly to the focused native window
+    /// instead of being routed to the Edit menu handlers.
+    /// </summary>
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        Keys modifiers = keyData & Keys.Modifiers;
+        Keys key = keyData & Keys.KeyCode;
+
+        if (modifiers == Keys.Control)
+        {
+            IntPtr focusedHwnd = GetFocus();
+            if (focusedHwnd != IntPtr.Zero && IsTextInputFocused())
+            {
+                int wmMsg = key switch
+                {
+                    Keys.V => WM_PASTE,
+                    Keys.C => WM_COPY,
+                    Keys.X => WM_CUT,
+                    Keys.Z => WM_UNDO,
+                    Keys.A => EM_SETSEL,
+                    _ => 0,
+                };
+
+                if (wmMsg != 0)
+                {
+                    if (wmMsg == EM_SETSEL)
+                        SendMessage(focusedHwnd, EM_SETSEL, IntPtr.Zero, (IntPtr)(-1));
+                    else
+                        SendMessage(focusedHwnd, wmMsg, IntPtr.Zero, IntPtr.Zero);
+
+                    return true; // Key handled — do not pass to menu system.
+                }
+            }
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
         // Forward to shortcut manager first.
@@ -1240,9 +1544,302 @@ public sealed class MainForm : Form
 
     private void AddTab(TabInfo tab)
     {
+        int insertAt = _deferredInsertIndex;
+        _deferredInsertIndex = -1;
+
+        if (insertAt >= 0 && insertAt <= _tabs.Count)
+        {
+            _tabs.Insert(insertAt, tab);
+            _tabStrip.InsertTab(insertAt, tab);
+            ActivateTab(insertAt);
+        }
+        else
+        {
+            _tabs.Add(tab);
+            _tabStrip.AddTab(tab);
+            ActivateTab(_tabs.Count - 1);
+        }
+    }
+
+    /// <summary>
+    /// Creates a lightweight placeholder tab for session restore.
+    /// The file is not loaded until the tab is activated.
+    /// </summary>
+    public void AddDeferredTab(string path, int zoom, int scroll, int caret)
+    {
+        var editor = new EditorControl();
+        editor.Theme = ThemeManager.Instance.CurrentTheme;
+
+        var tab = new TabInfo
+        {
+            Title = Path.GetFileName(path),
+            FilePath = path,
+            IsModified = false,
+            Editor = editor,
+            IsDeferredLoad = true,
+            PendingZoom = zoom,
+            PendingScroll = scroll,
+            PendingCaret = caret,
+        };
+
         _tabs.Add(tab);
-        _tabStrip.AddTab(tab);
-        ActivateTab(_tabs.Count - 1);
+        _tabStrip.AddTab(tab, select: false);
+    }
+
+    /// <summary>
+    /// Loads the file content for a deferred tab.
+    /// Reuses the existing EditorControl and replaces its document.
+    /// </summary>
+    private void LoadDeferredTab(TabInfo tab)
+    {
+        string path = tab.FilePath!;
+        tab.IsDeferredLoad = false;
+
+        if (!File.Exists(path))
+            return;
+
+        try
+        {
+            long fileSize = new FileInfo(path).Length;
+
+            if (IsBinaryFileFromStream(path) || fileSize > LargeFileThreshold)
+            {
+                // Binary / large files need specialised loading.
+                // Remove the placeholder and use the normal OpenFile path,
+                // preserving the original tab position.
+                int idx = _tabs.IndexOf(tab);
+                if (idx >= 0)
+                {
+                    _tabs.RemoveAt(idx);
+                    _tabStrip.RemoveTab(idx);
+                    _deferredInsertIndex = idx;
+                }
+                OpenFile(path);
+                _deferredInsertIndex = -1;
+                return;
+            }
+
+            byte[] smallRawBytes = File.ReadAllBytes(path);
+            var encoding = EncodingDetector.DetectEncoding(smallRawBytes.AsSpan());
+            byte[] preamble = encoding.GetPreamble();
+            bool hasBom = preamble.Length > 0 && smallRawBytes.Length >= preamble.Length
+                && smallRawBytes.AsSpan(0, preamble.Length).SequenceEqual(preamble);
+
+            string text = encoding.GetString(smallRawBytes);
+            if (hasBom && text.Length > 0 && text[0] == '\uFEFF')
+                text = text[1..];
+
+            var (normalizedText, detectedLineEnding) = NormalizeLineEndings(text);
+
+            var pieceTable = new PieceTable(normalizedText);
+            tab.Editor.Document = pieceTable;
+            tab.Editor.EncodingManager = new EncodingManager(encoding, hasBom);
+            tab.Editor.LineEnding = detectedLineEnding;
+            WireEditorEvents(tab.Editor);
+
+            string ext = Path.GetExtension(path);
+            ILexer? lexer = LexerRegistry.Instance.GetLexerByExtension(ext);
+            if (lexer is not null)
+                tab.Editor.SetLexer(lexer);
+
+            _fileWatcher.Watch(tab);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            OfferAdminElevation(path);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to load deferred tab: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Applies and clears pending zoom/scroll/caret state on a tab.
+    /// </summary>
+    private static void ApplyPendingTabState(TabInfo tab)
+    {
+        if (tab.PendingZoom == 0 && tab.PendingScroll == 0 && tab.PendingCaret == 0)
+            return;
+
+        if (tab.PendingZoom != 0)
+            tab.Editor.ZoomLevel = tab.PendingZoom;
+        if (tab.PendingScroll > 0)
+            tab.Editor.ScrollMgr.FirstVisibleLine = tab.PendingScroll;
+        if (tab.PendingCaret > 0 && tab.PendingCaret <= tab.Editor.GetBufferLength())
+            tab.Editor.CaretOffset = tab.PendingCaret;
+
+        tab.PendingZoom = 0;
+        tab.PendingScroll = 0;
+        tab.PendingCaret = 0;
+    }
+
+    /// <summary>
+    /// When a file cannot be opened due to access denied, offers to restart
+    /// the application as Administrator with the file path as argument.
+    /// Returns true if the user accepted and the elevated process was launched.
+    /// </summary>
+    private bool OfferAdminElevation(string path)
+    {
+        var result = MessageBox.Show(
+            string.Format(Strings.ErrorAccessDenied, path),
+            Strings.RestartAsAdmin,
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (result != DialogResult.Yes)
+            return false;
+
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Application.ExecutablePath,
+                Arguments = $"\"{path}\"",
+                Verb = "runas",
+                UseShellExecute = true,
+            };
+
+            System.Diagnostics.Process.Start(psi);
+            Application.Exit();
+            return true;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // User cancelled the UAC prompt.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Opens two file-open dialogs and compares the selected files in a diff tab.
+    /// </summary>
+    public void CompareFiles()
+    {
+        string filter = $"{Strings.FilterAllFiles} (*.*)|*.*";
+
+        using var dlg1 = new OpenFileDialog
+        {
+            Title = Strings.CompareSelectFirstFile,
+            Filter = filter,
+        };
+        if (dlg1.ShowDialog(this) != DialogResult.OK) return;
+
+        using var dlg2 = new OpenFileDialog
+        {
+            Title = Strings.CompareSelectSecondFile,
+            Filter = filter,
+        };
+        if (dlg2.ShowDialog(this) != DialogResult.OK) return;
+
+        string text1 = File.ReadAllText(dlg1.FileName);
+        string text2 = File.ReadAllText(dlg2.FileName);
+        string name1 = Path.GetFileName(dlg1.FileName);
+        string name2 = Path.GetFileName(dlg2.FileName);
+
+        var result = DiffEngine.Compare(text1, text2, name1, name2);
+
+        if (result.DiffCount == 0)
+        {
+            MessageBox.Show(this, Strings.DiffNoDifferences, Strings.AppTitle,
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        OpenDiffTab(result, $"{name1} \u2194 {name2}");
+    }
+
+    private void OpenDiffTab(DiffResult result, string title)
+    {
+        var diffView = new DiffViewControl();
+        diffView.LoadDiff(result);
+        diffView.ApplyTheme(ThemeManager.Instance.CurrentTheme);
+
+        var dummyEditor = new EditorControl { Visible = false };
+        var tab = new TabInfo
+        {
+            Title = title,
+            Editor = dummyEditor,
+            Tag = diffView,
+        };
+        AddTab(tab);
+    }
+
+    // ── Sed transform ──────────────────────────────────────────────
+
+    public void SedTransform()
+    {
+        var tab = ActiveTab;
+        if (tab is null)
+        {
+            MessageBox.Show(this, Strings.ErrorNoDocumentOpen, Strings.AppTitle,
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dlg = new SedInputDialog();
+        dlg.ApplyTheme(ThemeManager.Instance.CurrentTheme);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        if (!SedCommandParser.TryParse(dlg.Expression, out var cmd))
+            return;
+
+        string sourceText = tab.Editor.GetAllText();
+        var (resultText, count, ranges) = SedCommandParser.ExecuteWithRanges(cmd, sourceText);
+
+        OpenSedPreviewTab(dlg.Expression, resultText, count,
+            _tabs.IndexOf(tab), tab.Editor.Language, ranges);
+    }
+
+    private void OpenSedPreviewTab(string expression,
+        string transformedText, int replacementCount, int sourceTabIndex,
+        string? language, List<(int Start, int Length)> replacementRanges)
+    {
+        var preview = new SedPreviewControl();
+        preview.LoadPreview(expression, transformedText, replacementCount,
+            sourceTabIndex, language, replacementRanges);
+        preview.SetButtonLabels(Strings.SedPreviewApply, Strings.SedPreviewDiscard,
+            Strings.SedReplacementCount, expression, replacementCount);
+        preview.ApplyTheme(ThemeManager.Instance.CurrentTheme);
+        preview.ApplyRequested += OnSedApply;
+        preview.DiscardRequested += OnSedDiscard;
+
+        var dummyEditor = new EditorControl { Visible = false };
+        var tab = new TabInfo
+        {
+            Title = $"sed: {expression}",
+            Editor = dummyEditor,
+            Tag = preview,
+        };
+        AddTab(tab);
+    }
+
+    private void OnSedApply(SedPreviewControl preview)
+    {
+        int idx = preview.SourceTabIndex;
+        if (idx >= 0 && idx < _tabs.Count)
+        {
+            ActivateTab(idx);
+            ActiveTab!.Editor.TransformDocument(_ => preview.TransformedText);
+        }
+        CloseSedPreviewTab(preview);
+    }
+
+    private void OnSedDiscard(SedPreviewControl preview)
+    {
+        CloseSedPreviewTab(preview);
+    }
+
+    private void CloseSedPreviewTab(SedPreviewControl preview)
+    {
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            if (_tabs[i].Tag == preview)
+            {
+                CloseTab(i);
+                return;
+            }
+        }
     }
 
     private bool CloseTab(int index)
@@ -1286,6 +1883,18 @@ public sealed class MainForm : Form
 
         _editorPanel.Controls.Remove(tab.Editor);
         tab.Editor.Dispose();
+        if (tab.Tag is DiffViewControl diffView)
+        {
+            _editorPanel.Controls.Remove(diffView);
+            diffView.Dispose();
+        }
+        else if (tab.Tag is SedPreviewControl sedView)
+        {
+            sedView.ApplyRequested -= OnSedApply;
+            sedView.DiscardRequested -= OnSedDiscard;
+            _editorPanel.Controls.Remove(sedView);
+            sedView.Dispose();
+        }
         _tabs.RemoveAt(index);
         _tabStrip.RemoveTab(index);
 
@@ -1320,7 +1929,10 @@ public sealed class MainForm : Form
 
             string text = tab.Editor.GetAllText();
 
-            // Convert internal \n back to the file's line ending style.
+            // Normalize to \n first (defensive), then convert to target ending.
+            if (text.Contains('\r'))
+                text = text.Replace("\r\n", "\n").Replace("\r", "\n");
+
             string le = tab.Editor.LineEnding;
             if (le == "CRLF")
                 text = text.Replace("\n", "\r\n");
@@ -1419,7 +2031,26 @@ public sealed class MainForm : Form
             new ToolStripMenuItem(Strings.MenuReverseText, null, (_, _) => editor.TransformSelection(TextTransformations.ReverseText)),
         ]);
 
-        editor.AddContextMenuItems([selectedTextMenu], [selectedTextMenu]);
+        // ── JSON (works on selection or entire document) ─────
+        var jsonMenu = new ToolStripMenuItem(Strings.MenuJson);
+        jsonMenu.DropDownItems.AddRange([
+            new ToolStripMenuItem(Strings.MenuJsonFormat, null, (_, _) =>
+            {
+                if (editor.SelectionLength > 0)
+                    editor.TransformSelection(TextTransformations.JsonFormat);
+                else
+                    editor.TransformDocument(TextTransformations.JsonFormat);
+            }),
+            new ToolStripMenuItem(Strings.MenuJsonMinimize, null, (_, _) =>
+            {
+                if (editor.SelectionLength > 0)
+                    editor.TransformSelection(TextTransformations.JsonMinimize);
+                else
+                    editor.TransformDocument(TextTransformations.JsonMinimize);
+            }),
+        ]);
+
+        editor.AddContextMenuItems([selectedTextMenu, jsonMenu], [selectedTextMenu]);
     }
 
     private void OnEditorContentChanged(object? sender, EventArgs e)
@@ -1481,8 +2112,9 @@ public sealed class MainForm : Form
                 return engine.FindNext(document, e.StartOffset, e.Options);
             });
 
-            if (!cts.Token.IsCancellationRequested)
-                editor.SetFindNextResult(result);
+            // Always deliver the result to clear the "Searching..." status,
+            // even when cancelled (result will be null in that case).
+            editor.SetFindNextResult(result);
         }
         catch (ObjectDisposedException)
         {
@@ -1701,6 +2333,10 @@ public sealed class MainForm : Form
         foreach (var tab in _tabs)
         {
             tab.Editor.Theme = theme;
+            if (tab.Tag is DiffViewControl diffView)
+                diffView.ApplyTheme(theme);
+            else if (tab.Tag is SedPreviewControl sedView)
+                sedView.ApplyTheme(theme);
         }
 
         // ── Find results panel ────────────────────────────────────────
@@ -1860,10 +2496,10 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Files larger than this threshold (10 MB) use memory-mapped loading
-    /// on a background thread.
+    /// Files larger than this threshold use memory-mapped loading
+    /// on a background thread. Configurable via Settings.
     /// </summary>
-    private const long LargeFileThreshold = 10 * 1024 * 1024;
+    private static long LargeFileThreshold { get; set; } = 10L * 1024 * 1024;
 
     /// <summary>
     /// Detects whether a file is binary by checking for null bytes
@@ -2033,6 +2669,17 @@ public sealed class MainForm : Form
             _menuBuilder.RefreshEncodingMenu(this);
             _pluginHost.RaiseDocumentOpened(path);
         }
+        catch (UnauthorizedAccessException)
+        {
+            // Remove the placeholder tab that was already added.
+            int idx = _tabs.IndexOf(tab);
+            if (idx >= 0)
+            {
+                _tabs.RemoveAt(idx);
+                _tabStrip.RemoveTab(idx);
+            }
+            OfferAdminElevation(path);
+        }
         catch (Exception ex)
         {
             MessageBox.Show(
@@ -2080,6 +2727,37 @@ public sealed class MainForm : Form
             "SQL (*.sql)|*.sql",
             "Markdown (*.md)|*.md",
             "Text (*.txt)|*.txt");
+    }
+
+    /// <summary>
+    /// Returns true when the Win32 keyboard focus belongs to a TextBox or
+    /// ComboBox (including the internal native EDIT child of a ComboBox).
+    /// </summary>
+    private static bool IsTextInputFocused()
+    {
+        IntPtr hwnd = GetFocus();
+        if (hwnd == IntPtr.Zero) return false;
+
+        // Try to resolve a managed Control from the focused HWND.
+        Control? c = Control.FromHandle(hwnd);
+        if (c is TextBox or ComboBox) return true;
+
+        // ComboBox DropDown style: the internal EDIT child has focus.
+        // FromHandle returns null for the native EDIT, so walk native
+        // parent HWNDs until we find a managed ComboBox or TextBox.
+        if (c == null)
+        {
+            IntPtr parent = GetParent(hwnd);
+            while (parent != IntPtr.Zero)
+            {
+                Control? parentCtrl = Control.FromHandle(parent);
+                if (parentCtrl is TextBox or ComboBox) return true;
+                if (parentCtrl != null) break; // reached a managed control that isn't a text input
+                parent = GetParent(parent);
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

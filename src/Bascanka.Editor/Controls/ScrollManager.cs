@@ -9,7 +9,7 @@ namespace Bascanka.Editor.Controls;
 public sealed class ScrollManager
 {
     /// <summary>Number of lines scrolled per mouse wheel detent.</summary>
-    private const int LinesPerWheelClick = 3;
+    private static int LinesPerWheelClick => EditorControl.DefaultScrollSpeed;
 
     /// <summary>
     /// Maximum value used for the vertical scrollbar's range.  The actual

@@ -151,6 +151,11 @@ public sealed class SearchEngine
             if (idx >= 0)
                 return offset + idx;
 
+            // Last window covers the remainder of the range — stop to avoid
+            // an infinite loop when windowLen <= overlap (offset wouldn't advance).
+            if (windowLen < WindowSize)
+                break;
+
             offset += windowLen - overlap;
         }
 
@@ -179,6 +184,11 @@ public sealed class SearchEngine
             int idx = text.LastIndexOf(pattern, comparison);
             if (idx >= 0)
                 bestMatch = offset + idx;
+
+            // Last window covers the remainder of the range — stop to avoid
+            // an infinite loop when windowLen <= overlap (offset wouldn't advance).
+            if (windowLen < WindowSize)
+                break;
 
             offset += windowLen - overlap;
         }

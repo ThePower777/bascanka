@@ -10,7 +10,7 @@ namespace Bascanka.App;
 public sealed class RecentFilesManager
 {
     /// <summary>Maximum number of recent files to retain.</summary>
-    public const int MaxRecentFiles = 20;
+    public static int MaxRecentFiles { get; set; } = 20;
 
     private static readonly string DataDirectory =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Bascanka");

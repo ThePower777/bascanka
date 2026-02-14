@@ -120,22 +120,30 @@ public sealed class MenuBuilder
     {
         if (_languageMenu is null) return;
 
+        string? customProfileName = form.ActiveTab?.Editor.CustomProfileName;
+        bool isCustomActive = customProfileName is not null;
         string currentLangId = form.ActiveTab?.Editor.CurrentLexer?.LanguageId ?? "plaintext";
 
         foreach (ToolStripItem item in _languageMenu.DropDownItems)
         {
             if (item is not ToolStripMenuItem menuItem) continue;
 
+            // Skip the Custom submenu — it handles its own checkmarks dynamically.
+            if (menuItem.Text == Strings.MenuCustomHighlighting)
+                continue;
+
             // "Plain Text" item maps to "plaintext".
             if (menuItem.Text == Strings.PlainText)
             {
-                menuItem.Checked = string.Equals(currentLangId, "plaintext", StringComparison.OrdinalIgnoreCase);
+                menuItem.Checked = !isCustomActive &&
+                    string.Equals(currentLangId, "plaintext", StringComparison.OrdinalIgnoreCase);
             }
             else
             {
                 // Match by formatted display name → language id.
                 string itemLangId = ResolveLanguageId(menuItem.Text ?? string.Empty);
-                menuItem.Checked = string.Equals(itemLangId, currentLangId, StringComparison.OrdinalIgnoreCase);
+                menuItem.Checked = !isCustomActive &&
+                    string.Equals(itemLangId, currentLangId, StringComparison.OrdinalIgnoreCase);
             }
         }
     }
@@ -338,6 +346,16 @@ public sealed class MenuBuilder
         _textMenu.DropDownItems.Add(MakeSelectionItem(Strings.MenuReverseText,
             () => form.TransformSelection(TextTransformations.ReverseText)));
 
+        _textMenu.DropDownItems.Add(new ToolStripSeparator());
+
+        // ── JSON (works on selection or entire document) ─────────────
+        var jsonMenu = new ToolStripMenuItem(Strings.MenuJson);
+        jsonMenu.DropDownItems.Add(MakeItem(Strings.MenuJsonFormat, Keys.None,
+            () => form.TransformSelectionOrDocument(TextTransformations.JsonFormat)));
+        jsonMenu.DropDownItems.Add(MakeItem(Strings.MenuJsonMinimize, Keys.None,
+            () => form.TransformSelectionOrDocument(TextTransformations.JsonMinimize)));
+        _textMenu.DropDownItems.Add(jsonMenu);
+
         return _textMenu;
     }
 
@@ -355,32 +373,6 @@ public sealed class MenuBuilder
     {
         var menu = new ToolStripMenuItem(Strings.MenuView);
 
-        // Theme submenu.
-        var themeMenu = new ToolStripMenuItem(Strings.MenuTheme);
-        foreach (string themeName in ThemeManager.Instance.ThemeNames)
-        {
-            string captured = themeName;
-            themeMenu.DropDownItems.Add(MakeItem(captured, Keys.None,
-                () => ThemeManager.Instance.SetTheme(captured)));
-        }
-        menu.DropDownItems.Add(themeMenu);
-
-        // UI Language submenu.
-        var uiLangMenu = new ToolStripMenuItem(Strings.MenuUILanguage);
-        foreach (var (code, displayName) in LocalizationManager.GetAvailableLanguages())
-        {
-            string captured = code;
-            var item = new ToolStripMenuItem(displayName)
-            {
-                Checked = captured == LocalizationManager.CurrentLanguage,
-            };
-            item.Click += (_, _) => LocalizationManager.LoadLanguage(captured);
-            uiLangMenu.DropDownItems.Add(item);
-        }
-        menu.DropDownItems.Add(uiLangMenu);
-
-        menu.DropDownItems.Add(new ToolStripSeparator());
-
         _wordWrapItem = MakeItem(Strings.MenuWordWrap, Keys.None,
             () => form.ToggleWordWrap());
         menu.DropDownItems.Add(_wordWrapItem);
@@ -392,6 +384,15 @@ public sealed class MenuBuilder
         _lineNumbersItem = MakeItem(Strings.MenuLineNumbers, Keys.None,
             () => form.ToggleLineNumbers());
         menu.DropDownItems.Add(_lineNumbersItem);
+
+        menu.DropDownItems.Add(new ToolStripSeparator());
+
+        menu.DropDownItems.Add(MakeItem(Strings.MenuToggleFold, Keys.Control | Keys.Shift | Keys.OemOpenBrackets,
+            () => form.ToggleFoldAtCaret()));
+        menu.DropDownItems.Add(MakeItem(Strings.MenuFoldAll, Keys.Control | Keys.Shift | Keys.OemMinus,
+            () => form.FoldAll()));
+        menu.DropDownItems.Add(MakeItem(Strings.MenuUnfoldAll, Keys.Control | Keys.Shift | Keys.Oemplus,
+            () => form.UnfoldAll()));
 
         menu.DropDownItems.Add(new ToolStripSeparator());
 
@@ -524,6 +525,15 @@ public sealed class MenuBuilder
 
         _languageMenu.DropDownItems.Add(new ToolStripSeparator());
 
+        // Custom highlighting submenu (populated dynamically).
+        var customMenu = new ToolStripMenuItem(Strings.MenuCustomHighlighting);
+        customMenu.DropDownOpening += (_, _) => PopulateCustomHighlightMenu(customMenu, form);
+        // Seed with a placeholder so the submenu arrow appears.
+        customMenu.DropDownItems.Add(new ToolStripMenuItem("(loading)") { Enabled = false });
+        _languageMenu.DropDownItems.Add(customMenu);
+
+        _languageMenu.DropDownItems.Add(new ToolStripSeparator());
+
         foreach (string langId in LexerRegistry.Instance.LanguageIds)
         {
             string captured = langId;
@@ -532,6 +542,32 @@ public sealed class MenuBuilder
         }
 
         return _languageMenu;
+    }
+
+    private static void PopulateCustomHighlightMenu(ToolStripMenuItem customMenu, MainForm form)
+    {
+        customMenu.DropDownItems.Clear();
+
+        var profiles = form.CustomHighlightProfiles;
+        string? activeName = form.ActiveTab?.Editor.CustomProfileName;
+
+        foreach (var profile in profiles)
+        {
+            string capturedName = profile.Name;
+            var item = new ToolStripMenuItem(capturedName)
+            {
+                Checked = string.Equals(capturedName, activeName, StringComparison.OrdinalIgnoreCase),
+            };
+            item.Click += (_, _) => form.SetCustomHighlightProfile(capturedName);
+            customMenu.DropDownItems.Add(item);
+        }
+
+        if (profiles.Count > 0)
+            customMenu.DropDownItems.Add(new ToolStripSeparator());
+
+        var manageItem = new ToolStripMenuItem(Strings.MenuManageCustomHighlighting);
+        manageItem.Click += (_, _) => form.ShowCustomHighlightManager();
+        customMenu.DropDownItems.Add(manageItem);
     }
 
     // ── Tools Menu ───────────────────────────────────────────────────
@@ -562,6 +598,14 @@ public sealed class MenuBuilder
         _macroManagerItem = MakeItem(Strings.MenuMacroManager, Keys.None,
             () => form.ShowMacroManager());
         menu.DropDownItems.Add(_macroManagerItem);
+
+        menu.DropDownItems.Add(new ToolStripSeparator());
+
+        menu.DropDownItems.Add(MakeItem(Strings.MenuCompareFiles, Keys.None,
+            () => form.CompareFiles()));
+
+        menu.DropDownItems.Add(MakeItem(Strings.MenuSedTransform, Keys.None,
+            () => form.SedTransform()));
 
         menu.DropDownItems.Add(new ToolStripSeparator());
 

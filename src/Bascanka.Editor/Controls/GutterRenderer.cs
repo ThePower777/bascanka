@@ -1,5 +1,6 @@
 using System.Drawing;
 using Bascanka.Core.Buffer;
+using Bascanka.Core.Diff;
 using Bascanka.Editor.Themes;
 
 namespace Bascanka.Editor.Controls;
@@ -11,10 +12,10 @@ namespace Bascanka.Editor.Controls;
 /// </summary>
 public sealed class GutterRenderer
 {
-    private const int GutterPaddingLeft = 8;
-    private const int GutterPaddingRight = 12;
-    private const int BookmarkDiameter = 8;
-    private const int FoldButtonSize = 10;
+    private static int GutterPaddingLeft => EditorControl.DefaultGutterPaddingLeft;
+    private static int GutterPaddingRight => EditorControl.DefaultGutterPaddingRight;
+    private static int BookmarkDiameter => EditorControl.DefaultBookmarkSize;
+    private static int FoldButtonSize => EditorControl.DefaultFoldButtonSize;
 
     private readonly HashSet<long> _bookmarkedLines = new();
 
@@ -39,6 +40,9 @@ public sealed class GutterRenderer
 
     /// <summary>Colour of bookmark indicator circles.</summary>
     public Color BookmarkColor { get; set; } = Color.FromArgb(64, 128, 255);
+
+    /// <summary>Per-line diff metadata. When set, line numbers are remapped and gutter bars drawn.</summary>
+    public DiffLine[]? DiffLineMarkers { get; set; }
 
     // ────────────────────────────────────────────────────────────────────
     //  Width calculation
@@ -110,7 +114,8 @@ public sealed class GutterRenderer
         long currentLine,
         FoldingManager? foldingManager,
         ITheme? theme,
-        Func<long, int>? wrapRowCount = null)
+        Func<long, int>? wrapRowCount = null,
+        Func<long, (long DocLine, int WrapOffset)>? wrapRowToDocLine = null)
     {
         // Fill gutter background.
         using var bgBrush = new SolidBrush(BackgroundColor);
@@ -135,38 +140,104 @@ public sealed class GutterRenderer
         int visualRow = 0;
         int maxVisualRows = visibleLineCount;
 
+        // When word-wrap is active and firstVisibleLine is a wrap-row index,
+        // use the mapping function to resolve the starting document line.
+        long startDocLine = -1;
+        int firstLineWrapOff = 0;
+        if (wrapRowToDocLine is not null)
+        {
+            var (dl, wo) = wrapRowToDocLine(firstVisibleLine);
+            startDocLine = dl;
+            firstLineWrapOff = wo;
+        }
+
+        long iterDocLine = startDocLine >= 0 ? startDocLine : -1;
+
         for (int i = 0; visualRow < maxVisualRows; i++)
         {
-            long docLine = foldingManager is not null
-                ? foldingManager.VisibleLineToDocumentLine(firstVisibleLine + i)
-                : firstVisibleLine + i;
+            long docLine;
+            if (iterDocLine >= 0)
+            {
+                // Word-wrap mode: iterate document lines forward.
+                docLine = iterDocLine;
+                // Advance to next visible document line for next iteration.
+                iterDocLine++;
+                while (iterDocLine < totalLines && foldingManager is not null && !foldingManager.IsLineVisible(iterDocLine))
+                    iterDocLine++;
+            }
+            else
+            {
+                docLine = foldingManager is not null
+                    ? foldingManager.VisibleLineToDocumentLine(firstVisibleLine + i)
+                    : firstVisibleLine + i;
+            }
 
             if (docLine >= totalLines) break;
 
             int rowsForLine = wrapRowCount?.Invoke(docLine) ?? 1;
+            // For the first line, skip the wrap rows before the offset.
+            int firstRowOffset = (i == 0 && startDocLine >= 0) ? firstLineWrapOff : 0;
+            int renderedRows = rowsForLine - firstRowOffset;
             int y = visualRow * lineHeight;
             bool isCurrent = docLine == currentLine;
 
             // Line number text — only on the first visual row for this doc line.
-            string lineNum = (docLine + 1).ToString();
-            Color textColor = isCurrent ? CurrentLineColor : TextColor;
-
-            // Cache MeasureText by string length (all n-digit numbers are same width in monospace).
-            if (lineNum.Length != lastMeasuredLen)
+            // In diff mode, use original line numbers and skip padding lines.
+            bool skipLineNumber = false;
+            string lineNum;
+            if (DiffLineMarkers is not null && docLine < DiffLineMarkers.Length)
             {
-                Size textSize = TextRenderer.MeasureText(g, lineNum, font, Size.Empty,
-                    TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-                lastMeasuredWidth = textSize.Width;
-                lastMeasuredHeight = textSize.Height;
-                lastMeasuredLen = lineNum.Length;
+                var marker = DiffLineMarkers[docLine];
+                if (marker.OriginalLineNumber == -1)
+                {
+                    skipLineNumber = true;
+                    lineNum = string.Empty;
+                }
+                else
+                {
+                    lineNum = (marker.OriginalLineNumber + 1).ToString();
+                }
+
+                // Draw coloured gutter bar for diff lines.
+                Color? barColor = marker.Type switch
+                {
+                    DiffLineType.Added    => Color.FromArgb(200, 60, 190, 220),
+                    DiffLineType.Removed  => Color.FromArgb(200, 220, 70, 160),
+                    DiffLineType.Modified => Color.FromArgb(200, 170, 100, 245),
+                    _ => null,
+                };
+                if (barColor.HasValue)
+                {
+                    using var barBrush = new SolidBrush(barColor.Value);
+                    g.FillRectangle(barBrush, 0, y, 3, lineHeight);
+                }
+            }
+            else
+            {
+                lineNum = (docLine + 1).ToString();
             }
 
-            int textX = lineNumberRight - lastMeasuredWidth;
-            int textY = y + (lineHeight - lastMeasuredHeight) / 2;
+            Color textColor = isCurrent ? CurrentLineColor : TextColor;
 
-            TextRenderer.DrawText(g, lineNum, font,
-                new Point(textX, textY), textColor,
-                TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+            if (!skipLineNumber)
+            {
+                // Cache MeasureText by string length (all n-digit numbers are same width in monospace).
+                if (lineNum.Length != lastMeasuredLen)
+                {
+                    Size textSize = TextRenderer.MeasureText(g, lineNum, font, Size.Empty,
+                        TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                    lastMeasuredWidth = textSize.Width;
+                    lastMeasuredHeight = textSize.Height;
+                    lastMeasuredLen = lineNum.Length;
+                }
+
+                int textX = lineNumberRight - lastMeasuredWidth;
+                int textY = y + (lineHeight - lastMeasuredHeight) / 2;
+
+                TextRenderer.DrawText(g, lineNum, font,
+                    new Point(textX, textY), textColor,
+                    TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+            }
 
             // Bookmark indicator (blue circle).
             if (_bookmarkedLines.Contains(docLine))
@@ -202,7 +273,7 @@ public sealed class GutterRenderer
                 }
             }
 
-            visualRow += rowsForLine;
+            visualRow += renderedRows;
         }
     }
 
@@ -220,11 +291,35 @@ public sealed class GutterRenderer
     /// Returns the document line index for a Y coordinate in the gutter.
     /// </summary>
     public long GetLineFromY(int y, int lineHeight, long firstVisibleLine,
-        FoldingManager? foldingManager, Func<long, int>? wrapRowCount = null)
+        FoldingManager? foldingManager, Func<long, int>? wrapRowCount = null,
+        Func<long, (long DocLine, int WrapOffset)>? wrapRowToDocLine = null)
     {
         int targetRow = lineHeight > 0 ? y / lineHeight : 0;
 
-        if (wrapRowCount is not null)
+        if (wrapRowCount is not null && wrapRowToDocLine is not null)
+        {
+            var (startDocLine, wrapOff) = wrapRowToDocLine(firstVisibleLine);
+            int visualRow = 0;
+            long totalLines = foldingManager is not null
+                ? long.MaxValue // will be bounded by iteration
+                : long.MaxValue;
+
+            for (long docLine = startDocLine; ; docLine++)
+            {
+                if (foldingManager is not null && !foldingManager.IsLineVisible(docLine))
+                    continue;
+
+                int rows = wrapRowCount(docLine);
+                int firstRowOff = (docLine == startDocLine) ? wrapOff : 0;
+                int rendered = rows - firstRowOff;
+
+                if (targetRow < visualRow + rendered)
+                    return docLine;
+
+                visualRow += rendered;
+            }
+        }
+        else if (wrapRowCount is not null)
         {
             int visualRow = 0;
             for (long i = 0; ; i++)

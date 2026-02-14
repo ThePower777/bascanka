@@ -139,6 +139,11 @@ public sealed class PieceTable : IDisposable
         if (offset < 0 || offset > Length)
             throw new ArgumentOutOfRangeException(nameof(offset));
 
+        // Normalize line endings to \n (internal representation).
+        // Clipboard paste and plugin APIs may supply \r\n or bare \r.
+        if (text.Contains('\r'))
+            text = text.Replace("\r\n", "\n").Replace("\r", "\n");
+
         // Append the new text to the add buffer.
         long addStart = _addBuffer.Length;
         _addBuffer.Append(text);

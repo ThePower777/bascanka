@@ -96,6 +96,14 @@ public sealed class DarkTheme : ITheme
     public Color ScrollBarBackground => ColorTranslator.FromHtml("#1E1E1E");
     public Color ScrollBarThumb      => Color.FromArgb(100, 121, 121, 121);
 
+    // ── Diff highlighting ────────────────────────────────────────────
+    public Color DiffAddedBackground       => Color.FromArgb(55, 50, 200, 50);
+    public Color DiffRemovedBackground     => Color.FromArgb(55, 160, 50, 220);
+    public Color DiffModifiedBackground    => Color.FromArgb(50, 50, 130, 255);
+    public Color DiffModifiedCharBackground => Color.FromArgb(120, 70, 160, 255);
+    public Color DiffPaddingBackground     => Color.FromArgb(20, 160, 160, 180);
+    public Color DiffGutterMarker          => Color.FromArgb(200, 80, 160, 255);
+
     // ── Miscellaneous ─────────────────────────────────────────────────
 
     public Color FoldingMarker     => ColorTranslator.FromHtml("#C5C5C5");

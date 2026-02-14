@@ -26,13 +26,22 @@ public sealed class CaretManager : IDisposable
 
     public CaretManager()
     {
-        _blinkTimer = new System.Windows.Forms.Timer { Interval = 500 };
+        _blinkTimer = new System.Windows.Forms.Timer { Interval = EditorControl.DefaultCaretBlinkRate };
         _blinkTimer.Tick += OnBlinkTick;
     }
 
     // ────────────────────────────────────────────────────────────────────
     //  Properties
     // ────────────────────────────────────────────────────────────────────
+
+    /// <summary>The folding manager for skipping collapsed regions.</summary>
+    public FoldingManager? Folding { get; set; }
+
+    /// <summary>
+    /// When word-wrap is active, this delegate maps (docLine, column) to a global wrap-row index.
+    /// Used by <see cref="EnsureVisible"/> to scroll in wrap-row space.
+    /// </summary>
+    public Func<long, long, long>? LineColumnToVisibleRow { get; set; }
 
     /// <summary>The document buffer used for position calculations.</summary>
     public PieceTable? Document
@@ -46,6 +55,13 @@ public sealed class CaretManager : IDisposable
             _column = 0;
             _desiredColumn = -1;
         }
+    }
+
+    /// <summary>Gets or sets the blink timer interval in milliseconds.</summary>
+    public int BlinkInterval
+    {
+        get => _blinkTimer.Interval;
+        set => _blinkTimer.Interval = Math.Max(50, value);
     }
 
     /// <summary>Zero-based character offset of the caret in the document.</summary>
@@ -123,6 +139,10 @@ public sealed class CaretManager : IDisposable
         if (_desiredColumn < 0) _desiredColumn = _column;
 
         long newLine = _line - 1;
+
+        if (Folding is not null && !Folding.IsLineVisible(newLine))
+            newLine = Folding.NextVisibleLine(newLine, _document.LineCount, forward: false);
+
         long lineLen = _document.GetLineLength(newLine);
         long col = Math.Min(_desiredColumn, lineLen);
 
@@ -141,6 +161,12 @@ public sealed class CaretManager : IDisposable
         if (_desiredColumn < 0) _desiredColumn = _column;
 
         long newLine = _line + 1;
+
+        if (Folding is not null && !Folding.IsLineVisible(newLine))
+            newLine = Folding.NextVisibleLine(newLine, _document.LineCount, forward: true);
+
+        if (newLine >= _document.LineCount) return;
+
         long lineLen = _document.GetLineLength(newLine);
         long col = Math.Min(_desiredColumn, lineLen);
 
@@ -250,6 +276,10 @@ public sealed class CaretManager : IDisposable
         if (_desiredColumn < 0) _desiredColumn = _column;
 
         long newLine = Math.Max(0, _line - visibleLines);
+
+        if (Folding is not null && !Folding.IsLineVisible(newLine))
+            newLine = Folding.NextVisibleLine(newLine, _document.LineCount, forward: false);
+
         long lineLen = _document.GetLineLength(newLine);
         long col = Math.Min(_desiredColumn, lineLen);
 
@@ -268,6 +298,12 @@ public sealed class CaretManager : IDisposable
         if (_desiredColumn < 0) _desiredColumn = _column;
 
         long newLine = Math.Min(_document.LineCount - 1, _line + visibleLines);
+
+        if (Folding is not null && !Folding.IsLineVisible(newLine))
+            newLine = Folding.NextVisibleLine(newLine, _document.LineCount, forward: true);
+
+        if (newLine >= _document.LineCount) newLine = _document.LineCount - 1;
+
         long lineLen = _document.GetLineLength(newLine);
         long col = Math.Min(_desiredColumn, lineLen);
 
@@ -302,24 +338,44 @@ public sealed class CaretManager : IDisposable
     {
         if (scroll is null) return;
 
-        // Vertical
-        if (_line < scroll.FirstVisibleLine)
+        // Convert document line to visible-line index.
+        long visLine;
+        if (LineColumnToVisibleRow is not null)
         {
-            scroll.ScrollToLine(_line);
+            // Word-wrap active: map (line, column) to a global wrap-row index.
+            visLine = LineColumnToVisibleRow(_line, _column);
         }
-        else if (_line >= scroll.FirstVisibleLine + visibleLines)
+        else if (Folding is not null)
         {
-            scroll.ScrollToLine(_line - visibleLines + 1);
+            visLine = Folding.DocumentLineToVisibleLine(_line);
+        }
+        else
+        {
+            visLine = _line;
+        }
+        if (visLine < 0) visLine = _line; // fallback if line is hidden
+
+        // Vertical
+        if (visLine < scroll.FirstVisibleLine)
+        {
+            scroll.ScrollToLine(visLine);
+        }
+        else if (visLine >= scroll.FirstVisibleLine + visibleLines)
+        {
+            scroll.ScrollToLine(visLine - visibleLines + 1);
         }
 
-        // Horizontal
-        if (_column < scroll.HorizontalScrollOffset)
+        // Horizontal (no horizontal scroll when word-wrap is on)
+        if (LineColumnToVisibleRow is null)
         {
-            scroll.HorizontalScrollOffset = (int)Math.Max(0, _column - 4);
-        }
-        else if (_column >= scroll.HorizontalScrollOffset + visibleColumns)
-        {
-            scroll.HorizontalScrollOffset = (int)(_column - visibleColumns + 4);
+            if (_column < scroll.HorizontalScrollOffset)
+            {
+                scroll.HorizontalScrollOffset = (int)Math.Max(0, _column - EditorControl.DefaultCaretScrollBuffer);
+            }
+            else if (_column >= scroll.HorizontalScrollOffset + visibleColumns)
+            {
+                scroll.HorizontalScrollOffset = (int)(_column - visibleColumns + EditorControl.DefaultCaretScrollBuffer);
+            }
         }
     }
 

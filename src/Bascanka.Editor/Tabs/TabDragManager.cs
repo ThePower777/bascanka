@@ -31,7 +31,7 @@ public sealed class TabMovedEventArgs : EventArgs
 public sealed class TabDragManager
 {
     // ── Constants ─────────────────────────────────────────────────────
-    private const int DragDeadZone = 5; // pixels before drag activates
+    private const int DragDeadZone = 10; // pixels before drag activates
     private const float GhostAlpha = 0.65f;
 
     // ── State ─────────────────────────────────────────────────────────
@@ -162,7 +162,12 @@ public sealed class TabDragManager
             int dy = Math.Abs(e.Y - _dragStartPoint.Y);
             if (dx > DragDeadZone || dy > DragDeadZone)
             {
-                BeginDrag();
+                // Only start a drag if the cursor has moved over a
+                // different tab — prevents accidental reorders from
+                // small mouse movements within the same tab.
+                int hoverIndex = _tabStrip.HitTestTab(e.Location);
+                if (hoverIndex >= 0 && hoverIndex != _dragTabIndex)
+                    BeginDrag();
             }
         }
 

@@ -23,6 +23,8 @@ public sealed class ThemeManager
     // ── State ─────────────────────────────────────────────────────────
 
     private readonly Dictionary<string, ITheme> _themes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ITheme> _baseThemes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Dictionary<string, Color>> _overrides = new(StringComparer.OrdinalIgnoreCase);
     private ITheme _currentTheme;
 
     private ThemeManager()
@@ -32,6 +34,8 @@ public sealed class ThemeManager
         var light = new LightTheme();
         _themes[dark.Name] = dark;
         _themes[light.Name] = light;
+        _baseThemes[dark.Name] = dark;
+        _baseThemes[light.Name] = light;
         _currentTheme = dark;
     }
 
@@ -72,6 +76,8 @@ public sealed class ThemeManager
     {
         ArgumentNullException.ThrowIfNull(theme);
         _themes[theme.Name] = theme;
+        if (!_baseThemes.ContainsKey(theme.Name))
+            _baseThemes[theme.Name] = theme;
     }
 
     /// <summary>
@@ -86,6 +92,65 @@ public sealed class ThemeManager
         if (!_themes.TryGetValue(name, out var theme))
             throw new KeyNotFoundException($"No theme registered with the name \"{name}\".");
         CurrentTheme = theme;
+    }
+
+    /// <summary>
+    /// Returns the base (built-in) theme for the given name, ignoring overrides.
+    /// </summary>
+    public ITheme? GetBaseTheme(string themeName)
+    {
+        _baseThemes.TryGetValue(themeName, out var theme);
+        return theme;
+    }
+
+    /// <summary>
+    /// Returns the current colour override dictionary for the given theme, or null if none.
+    /// </summary>
+    public Dictionary<string, Color>? GetOverrides(string themeName)
+    {
+        _overrides.TryGetValue(themeName, out var dict);
+        return dict;
+    }
+
+    /// <summary>
+    /// Applies (or clears) colour overrides on top of the base theme.
+    /// If <paramref name="overrides"/> is null or empty the theme reverts to its base.
+    /// Re-fires <see cref="ThemeChanged"/> if the affected theme is the current one.
+    /// </summary>
+    public void ApplyOverrides(string themeName, Dictionary<string, Color>? overrides)
+    {
+        if (!_baseThemes.TryGetValue(themeName, out var baseTheme))
+            return;
+
+        if (overrides is null || overrides.Count == 0)
+        {
+            _overrides.Remove(themeName);
+            _themes[themeName] = baseTheme;
+        }
+        else
+        {
+            _overrides[themeName] = overrides;
+            _themes[themeName] = new JsonTheme(themeName, overrides, baseTheme);
+        }
+
+        // Re-fire if it affects the active theme.
+        if (string.Equals(_currentTheme.Name, themeName, StringComparison.OrdinalIgnoreCase))
+        {
+            _currentTheme = _themes[themeName];
+            ThemeChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Reads a colour from a theme by property name using reflection.
+    /// Returns null if the property does not exist.
+    /// </summary>
+    public static Color? GetThemeColor(ITheme theme, string propertyName)
+    {
+        var prop = typeof(ITheme).GetProperty(propertyName);
+        if (prop is not null && prop.PropertyType == typeof(Color))
+            return (Color)prop.GetValue(theme)!;
+        return null;
     }
 
     /// <summary>
@@ -223,6 +288,12 @@ public sealed class ThemeManager
         public Color MenuHighlight         => Get(nameof(MenuHighlight),         t => t.MenuHighlight);
         public Color ScrollBarBackground   => Get(nameof(ScrollBarBackground),   t => t.ScrollBarBackground);
         public Color ScrollBarThumb        => Get(nameof(ScrollBarThumb),        t => t.ScrollBarThumb);
+        public Color DiffAddedBackground        => Get(nameof(DiffAddedBackground),        t => t.DiffAddedBackground);
+        public Color DiffRemovedBackground      => Get(nameof(DiffRemovedBackground),      t => t.DiffRemovedBackground);
+        public Color DiffModifiedBackground     => Get(nameof(DiffModifiedBackground),     t => t.DiffModifiedBackground);
+        public Color DiffModifiedCharBackground => Get(nameof(DiffModifiedCharBackground), t => t.DiffModifiedCharBackground);
+        public Color DiffPaddingBackground      => Get(nameof(DiffPaddingBackground),      t => t.DiffPaddingBackground);
+        public Color DiffGutterMarker           => Get(nameof(DiffGutterMarker),           t => t.DiffGutterMarker);
         public Color FoldingMarker         => Get(nameof(FoldingMarker),         t => t.FoldingMarker);
         public Color ModifiedIndicator     => Get(nameof(ModifiedIndicator),     t => t.ModifiedIndicator);
     }
