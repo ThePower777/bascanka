@@ -571,8 +571,9 @@ User-defined regex-based highlighting profiles, stored in `Bascanka.json` next t
 
 | Type | Fields | Description |
 |------|--------|-------------|
-| Match | `pattern`, `foreground`, `background` | Highlight regex matches on each line |
-| Block | `begin`, `end`, `foldable`, `foreground`, `background` | Highlight multi-line regions between start/end patterns |
+| match | `pattern`, `foreground`, `background` | Highlight regex matches on exact pattern |
+| line | `pattern`, `foreground`, `background` | Highlight regex matches on complete line |
+| block | `begin`, `end`, `foldable`, `foreground`, `background` | Highlight multi-line regions between start/end patterns |
 
 ### Management
 
