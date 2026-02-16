@@ -3,6 +3,7 @@
 - fixed emoji and special character rendering, cursor positioning, selection, and caret navigation - including surrogate pairs, ZWJ sequences and variation selectors.
 - lines containing wide or special characters are now rendered character-by-character to prevent GDI font fallback from causing cursor drift.
 - improved Unicode character support.
+- added double-click on empty tab bar area to create a new untitled document.
 
 v.1.0.2.		2026-02-15
 --------------------------

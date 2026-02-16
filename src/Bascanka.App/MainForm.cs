@@ -161,6 +161,7 @@ public sealed class MainForm : Form
         _tabStrip.TabClosed += OnTabCloseRequested;
         _tabStrip.TabsReordered += OnTabsReordered;
         _tabStrip.TabContextMenuOpening += OnTabContextMenuOpening;
+        _tabStrip.NewTabRequested += (_, _) => NewDocument();
 
         // ── Add controls in correct Z-order ──────────────────────────
         Controls.Add(_verticalSplit);
