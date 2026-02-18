@@ -152,12 +152,16 @@ public class TabStrip : Control
     /// The theme used for rendering.  When set, the control is invalidated
     /// so that the new colours take effect immediately.
     /// </summary>
+    public Func<ITheme, ToolStripRenderer>? ContextMenuRenderer { get; set; }
+
     public ITheme? Theme
     {
         get => _theme;
         set
         {
             _theme = value;
+            if (value is not null && ContextMenuRenderer is not null)
+                _contextMenu.Renderer = ContextMenuRenderer(value);
             Invalidate();
         }
     }

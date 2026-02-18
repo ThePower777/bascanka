@@ -49,6 +49,7 @@ public sealed class MenuBuilder
     private ToolStripMenuItem? _showWhitespaceItem;
     private ToolStripMenuItem? _lineNumbersItem;
     private ToolStripMenuItem? _findResultsItem;
+    private ToolStripMenuItem? _terminalItem;
 
     // Tools menu items for enable/disable toggling.
     private ToolStripMenuItem? _hexEditorItem;
@@ -94,13 +95,41 @@ public sealed class MenuBuilder
             return;
         }
 
+        bool separated = SettingsManager.GetBool(SettingsManager.KeyRecentFilesSeparated, true);
+
+        var items = new List<RecentFileMenuItem>();
         foreach (string path in recent)
         {
-            string displayPath = path;
             string capturedPath = path;
-            var item = new ToolStripMenuItem(displayPath);
+            var item = new RecentFileMenuItem(path);
             item.Click += (_, _) => form.OpenFile(capturedPath);
-            _recentFilesMenu.DropDownItems.Add(item);
+            items.Add(item);
+        }
+
+        if (separated)
+        {
+            // Two-column layout: directory | filename.
+            var font = _recentFilesMenu.Font;
+            var measureFlags = TextFormatFlags.NoPrefix;
+            int maxNameW = 0;
+            foreach (var item in items)
+            {
+                int w = TextRenderer.MeasureText(item.FileName, font, new Size(int.MaxValue, int.MaxValue), measureFlags).Width;
+                maxNameW = Math.Max(maxNameW, w);
+            }
+            const string columnGap = "      ";
+            foreach (var item in items)
+            {
+                item.FileNameColumnWidth = maxNameW;
+                item.Text = item.DirPart + columnGap + item.FileName;
+                _recentFilesMenu.DropDownItems.Add(item);
+            }
+        }
+        else
+        {
+            // Simple full-path list.
+            foreach (var item in items)
+                _recentFilesMenu.DropDownItems.Add(item);
         }
 
         _recentFilesMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -179,6 +208,7 @@ public sealed class MenuBuilder
             () => form.OpenFile()));
 
         _recentFilesMenu = new ToolStripMenuItem(Strings.MenuOpenRecent);
+        _recentFilesMenu.DropDownOpening += (_, _) => RefreshRecentFilesMenu(form);
         RefreshRecentFilesMenu(form);
         menu.DropDownItems.Add(_recentFilesMenu);
 
@@ -387,12 +417,14 @@ public sealed class MenuBuilder
 
         menu.DropDownItems.Add(new ToolStripSeparator());
 
-        menu.DropDownItems.Add(MakeItem(Strings.MenuToggleFold, Keys.Control | Keys.Shift | Keys.OemOpenBrackets,
+        var foldingMenu = new ToolStripMenuItem(Strings.MenuFolding);
+        foldingMenu.DropDownItems.Add(MakeItem(Strings.MenuToggleFold, Keys.Control | Keys.Shift | Keys.OemOpenBrackets,
             () => form.ToggleFoldAtCaret()));
-        menu.DropDownItems.Add(MakeItem(Strings.MenuFoldAll, Keys.Control | Keys.Shift | Keys.OemMinus,
+        foldingMenu.DropDownItems.Add(MakeItem(Strings.MenuFoldAll, Keys.Control | Keys.Shift | Keys.OemMinus,
             () => form.FoldAll()));
-        menu.DropDownItems.Add(MakeItem(Strings.MenuUnfoldAll, Keys.Control | Keys.Shift | Keys.Oemplus,
+        foldingMenu.DropDownItems.Add(MakeItem(Strings.MenuUnfoldAll, Keys.Control | Keys.Shift | Keys.Oemplus,
             () => form.UnfoldAll()));
+        menu.DropDownItems.Add(foldingMenu);
 
         menu.DropDownItems.Add(new ToolStripSeparator());
 
@@ -415,9 +447,17 @@ public sealed class MenuBuilder
         menu.DropDownItems.Add(MakeItem(Strings.MenuSymbolList, Keys.None,
             () => form.ToggleSymbolList()));
 
+        menu.DropDownItems.Add(new ToolStripSeparator());
+
         _findResultsItem = MakeItem(Strings.MenuFindResults, Keys.None,
             () => { form.ToggleFindResults(); UpdateMenuState(form); });
         menu.DropDownItems.Add(_findResultsItem);
+
+        menu.DropDownItems.Add(new ToolStripSeparator());
+
+        _terminalItem = MakeItem(Strings.MenuTerminal, Keys.Control | Keys.Oemtilde,
+            () => { form.ToggleTerminal(); UpdateMenuState(form); });
+        menu.DropDownItems.Add(_terminalItem);
 
         return menu;
     }
@@ -613,6 +653,11 @@ public sealed class MenuBuilder
 
         menu.DropDownItems.Add(new ToolStripSeparator());
 
+        menu.DropDownItems.Add(MakeItem(Strings.MenuOpenAppData, Keys.None,
+            () => form.OpenAppDataFolder()));
+
+        menu.DropDownItems.Add(new ToolStripSeparator());
+
         menu.DropDownItems.Add(MakeItem(Strings.MenuSettings, Keys.None,
             () => form.ShowSettings()));
 
@@ -698,9 +743,11 @@ public sealed class MenuBuilder
         if (_showWhitespaceItem is not null) _showWhitespaceItem.Checked = hasTab && editor!.ShowWhitespace;
         if (_lineNumbersItem is not null) _lineNumbersItem.Checked = !hasTab || editor!.ShowLineNumbers;
 
-        // Find results panel checkmark.
+        // Bottom panel checkmarks.
         if (_findResultsItem is not null)
-            _findResultsItem.Checked = form.IsBottomPanelVisible;
+            _findResultsItem.Checked = form.IsBottomPanelVisible && form.IsFindResultsTabActive;
+        if (_terminalItem is not null)
+            _terminalItem.Checked = form.IsBottomPanelVisible && form.IsTerminalTabActive;
 
         // Tools menu.
         if (_hexEditorItem is not null)
@@ -794,5 +841,24 @@ public sealed class MenuBuilder
             "Markdown" => "markdown",
             _ => displayName.ToLowerInvariant(),
         };
+    }
+}
+
+/// <summary>
+/// Menu item for recent files. Stores the split path so the themed
+/// renderer can draw directory and filename in different colors.
+/// </summary>
+internal sealed class RecentFileMenuItem : ToolStripMenuItem
+{
+    public readonly string DirPart;
+    public readonly string FileName;
+    public int FileNameColumnWidth;
+
+    public RecentFileMenuItem(string fullPath) : base(fullPath)
+    {
+        FileName = Path.GetFileName(fullPath);
+        DirPart = fullPath.Length > FileName.Length
+            ? fullPath[..^FileName.Length]
+            : string.Empty;
     }
 }

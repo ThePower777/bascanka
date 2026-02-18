@@ -14,6 +14,8 @@
     <Version>1.0.3</Version>
   </PropertyGroup>
   <ItemGroup>
+    <None Remove="Resources\AppxManifest.xml.template" />
+    <None Remove="Resources\Bascanka.Explorer.ContextMenu.dll" />
     <None Remove="Resources\bascanka.ico" />
     <None Remove="Resources\bascanka_logo.png" />
     <None Remove="Resources\bascanska_ploca.jpg" />
@@ -27,6 +29,8 @@
   <ItemGroup>
     <EmbeddedResource Include="..\..\contributors.txt" Link="Resources\contributors.txt" />
     <EmbeddedResource Include="..\..\release_notes.txt" Link="Resources\release_notes.txt" />
+    <EmbeddedResource Include="Resources\AppxManifest.xml.template" />
+    <EmbeddedResource Include="Resources\Bascanka.Explorer.ContextMenu.dll" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\bascanka.ico" />

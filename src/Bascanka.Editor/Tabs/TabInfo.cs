@@ -13,7 +13,7 @@ public sealed class TabInfo
     /// Unique, immutable identifier for this tab instance.  Generated once at
     /// construction and never changes, even if the tab is reordered or renamed.
     /// </summary>
-    public Guid Id { get; } = Guid.NewGuid();
+    public Guid Id { get; init; } = Guid.NewGuid();
 
     /// <summary>
     /// Display title shown on the tab strip.  Typically the file name (without
@@ -68,6 +68,12 @@ public sealed class TabInfo
 
     /// <summary>Pending caret offset to apply after loading/activation.</summary>
     public long PendingCaret { get; set; }
+
+    /// <summary>
+    /// True while the tab's file is being loaded asynchronously (e.g. large file
+    /// incremental scan or recovery loading).  Saving is blocked while loading.
+    /// </summary>
+    public bool IsLoading { get; set; }
 
     /// <summary>
     /// Returns the display title, including a modified indicator when applicable.

@@ -1,9 +1,16 @@
-﻿v.1.0.3.		????-??-??
+﻿v.1.0.3.		2025-02-18
 --------------------------
+- implemented embedded terminal (cmd.exe) to the bottom panel using the Windows ConPTY API.
+- added close/crash unsaved changes recovery with periodic automatic back-ups to "%AppData%\Bascanka\recovery" - small/untitled files are backed up in full size as UTF-8, while large memory-mapped files use efficient binary delta/changes-only save format.
 - fixed emoji and special character rendering, cursor positioning, selection, and caret navigation - including surrogate pairs, ZWJ sequences and variation selectors.
 - lines containing wide or special characters are now rendered character-by-character to prevent GDI font fallback from causing cursor drift.
 - improved Unicode character support.
+- implemented a pending-delta mechanism for the line offset cache — consecutive same-line edits accumulate a virtual shift in O(1) instead of triggering an O(N) full-document rescan.
 - added double-click on empty tab bar area to create a new untitled document.
+- added tabbed bottom panel - Find Results and Terminal now share a tabbed bottom panel.
+- fixed search history not being saved correctly.
+- added Modern Windows Context Menu registration from Settings ("Edit with Bascanka"), with automatic sparse package and COM shell extension setup.
+- only one Bascanka instance now runs at a time - opening files while it's running forwards them to the existing window via named pipes.
 
 v.1.0.2.		2026-02-15
 --------------------------

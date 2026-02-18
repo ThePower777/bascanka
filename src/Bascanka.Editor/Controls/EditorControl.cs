@@ -362,6 +362,12 @@ public sealed class EditorControl : UserControl
         }
     }
 
+    /// <summary>
+    /// Optional factory for the context menu renderer. When set, the editor
+    /// uses it instead of its built-in <c>ThemedContextMenuRenderer</c>.
+    /// </summary>
+    public Func<ITheme, ToolStripRenderer>? ContextMenuRenderer { get; set; }
+
     /// <summary>The current colour theme.</summary>
     public ITheme Theme
     {
@@ -1525,8 +1531,20 @@ public sealed class EditorControl : UserControl
         if (_hexEditor is not null)
             _hexEditor.Theme = theme;
 
-        // Context menu theming.
-        _contextMenu.Renderer = new ThemedContextMenuRenderer(theme);
+        ApplyContextMenuTheme(theme);
+    }
+
+    /// <summary>
+    /// Applies the context menu renderer for the given theme.
+    /// Call after setting <see cref="ContextMenuRenderer"/> if the theme
+    /// was already applied.
+    /// </summary>
+    public void ApplyContextMenuTheme(ITheme? theme = null)
+    {
+        theme ??= _theme;
+        if (theme is null) return;
+        _contextMenu.Renderer = ContextMenuRenderer?.Invoke(theme)
+            ?? new ThemedContextMenuRenderer(theme);
     }
 
     // ────────────────────────────────────────────────────────────────────

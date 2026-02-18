@@ -1,4 +1,5 @@
 using System.Reflection;
+using Bascanka.Editor.Themes;
 
 namespace Bascanka.App;
 
@@ -8,7 +9,7 @@ namespace Bascanka.App;
 /// </summary>
 internal sealed class AboutForm : Form
 {
-    public AboutForm()
+    public AboutForm(ITheme theme)
     {
         Text = Strings.MenuAbout.Replace("&", "");
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -16,9 +17,22 @@ internal sealed class AboutForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        BackColor = Color.FromArgb(30, 30, 30);
-        ForeColor = Color.FromArgb(220, 220, 220);
         ClientSize = new Size(1060, 800);
+
+        // ── Derive colours from theme ───────────────────────────────
+        Color bg = theme.EditorBackground;
+        Color fg = theme.EditorForeground;
+        Color dimFg = Blend(fg, bg, 0.35f);       // muted text
+        Color subtleFg = Blend(fg, bg, 0.20f);    // very muted
+        Color accentFg = theme.FindPanelForeground;
+        Color panelBg = Blend(bg, fg, 0.03f);     // slightly lighter/darker
+        Color sepColor = Blend(bg, fg, 0.12f);    // separator
+        Color btnBg = Blend(bg, fg, 0.08f);       // button background
+        Color btnBorder = Blend(bg, fg, 0.18f);   // button border
+        Color linkColor = BlendAccent(theme);
+
+        BackColor = bg;
+        ForeColor = fg;
 
         var asm = Assembly.GetExecutingAssembly();
 
@@ -27,7 +41,7 @@ internal sealed class AboutForm : Form
         {
             Dock = DockStyle.Bottom,
             Height = 50,
-            BackColor = BackColor,
+            BackColor = bg,
         };
 
         var okButton = new Button
@@ -35,12 +49,12 @@ internal sealed class AboutForm : Form
             Text = Strings.ButtonOK,
             DialogResult = DialogResult.OK,
             FlatStyle = FlatStyle.Flat,
-            BackColor = Color.FromArgb(50, 50, 50),
-            ForeColor = Color.FromArgb(220, 220, 220),
+            BackColor = btnBg,
+            ForeColor = fg,
             Font = new Font("Segoe UI", 9.5f),
             Size = new Size(90, 32),
         };
-        okButton.FlatAppearance.BorderColor = Color.FromArgb(80, 80, 80);
+        okButton.FlatAppearance.BorderColor = btnBorder;
 
         bottomPanel.Layout += (_, _) =>
         {
@@ -58,7 +72,7 @@ internal sealed class AboutForm : Form
         {
             Dock = DockStyle.Left,
             Width = 520,
-            BackColor = BackColor,
+            BackColor = bg,
             AutoScroll = true,
         };
 
@@ -68,7 +82,7 @@ internal sealed class AboutForm : Form
             SizeMode = PictureBoxSizeMode.Zoom,
             Dock = DockStyle.Top,
             Height = 128,
-            BackColor = BackColor,
+            BackColor = bg,
         };
         using var logoStream = asm.GetManifestResourceStream("Bascanka.App.Resources.bascanka_logo.png");
         if (logoStream is not null)
@@ -79,7 +93,7 @@ internal sealed class AboutForm : Form
         {
             Text = "Bascanka",
             Font = new Font("Segoe UI", 22f, FontStyle.Bold),
-            ForeColor = Color.FromArgb(86, 156, 214),
+            ForeColor = linkColor,
             TextAlign = ContentAlignment.MiddleCenter,
             Dock = DockStyle.Top,
             Height = 44,
@@ -92,7 +106,7 @@ internal sealed class AboutForm : Form
         {
             Text = $"Version {version}",
             Font = new Font("Segoe UI", 9.5f),
-            ForeColor = Color.FromArgb(150, 150, 150),
+            ForeColor = dimFg,
             TextAlign = ContentAlignment.MiddleCenter,
             Dock = DockStyle.Top,
             Height = 22,
@@ -103,7 +117,7 @@ internal sealed class AboutForm : Form
         {
             Text = "\u00a9 2026 Josip Habjan. All rights reserved.",
             Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Color.FromArgb(130, 130, 130),
+            ForeColor = subtleFg,
             TextAlign = ContentAlignment.MiddleCenter,
             Dock = DockStyle.Top,
             Height = 20,
@@ -114,7 +128,7 @@ internal sealed class AboutForm : Form
         {
             Text = "Open source text editor for Windows.",
             Font = new Font("Segoe UI", 10f),
-            ForeColor = Color.FromArgb(200, 200, 200),
+            ForeColor = accentFg,
             TextAlign = ContentAlignment.MiddleCenter,
             Dock = DockStyle.Top,
             Height = 28,
@@ -126,7 +140,7 @@ internal sealed class AboutForm : Form
         {
             Text = "GNU GENERAL PUBLIC LICENSE Version 3",
             Font = new Font("Segoe UI", 8.5f),
-            ForeColor = Color.FromArgb(130, 130, 130),
+            ForeColor = subtleFg,
             TextAlign = ContentAlignment.MiddleCenter,
             Dock = DockStyle.Top,
             Height = 20,
@@ -137,7 +151,7 @@ internal sealed class AboutForm : Form
         {
             Dock = DockStyle.Top,
             Height = 1,
-            BackColor = Color.FromArgb(60, 60, 60),
+            BackColor = sepColor,
         };
 
         // Origin text.
@@ -151,7 +165,7 @@ internal sealed class AboutForm : Form
                    "tablet documents a royal land donation by King Zvonimir and " +
                    "is a cornerstone of Croatian cultural heritage and literacy.",
             Font = new Font("Segoe UI", 9f),
-            ForeColor = Color.FromArgb(180, 180, 180),
+            ForeColor = dimFg,
             TextAlign = ContentAlignment.TopCenter,
             Dock = DockStyle.Top,
             AutoSize = true,
@@ -164,7 +178,7 @@ internal sealed class AboutForm : Form
         {
             Dock = DockStyle.Top,
             Height = 40,
-            BackColor = BackColor,
+            BackColor = bg,
             Padding = new Padding(0, 6, 0, 12),
         };
 
@@ -178,7 +192,7 @@ internal sealed class AboutForm : Form
         {
             Text = authorPrefix,
             Font = authorFont,
-            ForeColor = Color.FromArgb(200, 200, 200),
+            ForeColor = accentFg,
             AutoSize = true,
         };
 
@@ -186,21 +200,22 @@ internal sealed class AboutForm : Form
         {
             Text = email,
             Font = emailFont,
-            ForeColor = Color.FromArgb(86, 156, 214),
+            ForeColor = linkColor,
             AutoSize = true,
             Cursor = Cursors.Hand,
         };
+        Color savedLinkColor = linkColor;
         emailLink.Click += (_, _) =>
         {
             Clipboard.SetText(email);
             var saved = emailLink.Text;
             emailLink.Text = "Copied!";
-            emailLink.ForeColor = Color.FromArgb(78, 201, 176);
+            emailLink.ForeColor = theme.ModifiedIndicator;
             var timer = new System.Windows.Forms.Timer { Interval = 1500 };
             timer.Tick += (_, _) =>
             {
                 emailLink.Text = saved;
-                emailLink.ForeColor = Color.FromArgb(86, 156, 214);
+                emailLink.ForeColor = savedLinkColor;
                 timer.Stop();
                 timer.Dispose();
             };
@@ -226,7 +241,7 @@ internal sealed class AboutForm : Form
             Dock = DockStyle.Top,
             Height = 240,
             Padding = new Padding(20, 0, 20, 0),
-            BackColor = BackColor,
+            BackColor = bg,
         };
         using var stream = asm.GetManifestResourceStream("Bascanka.App.Resources.bascanska_ploca.jpg");
         if (stream is not null)
@@ -234,32 +249,32 @@ internal sealed class AboutForm : Form
 
         // Assemble left panel (reverse order for Dock.Top stacking).
         leftPanel.Controls.Add(pictureBox);
-        leftPanel.Controls.Add(new Label { Dock = DockStyle.Top, Height = 16, BackColor = BackColor });
+        leftPanel.Controls.Add(new Label { Dock = DockStyle.Top, Height = 16, BackColor = bg });
         leftPanel.Controls.Add(authorPanel);
         leftPanel.Controls.Add(originLabel);
         leftPanel.Controls.Add(separator);
-        leftPanel.Controls.Add(new Label { Dock = DockStyle.Top, Height = 8, BackColor = BackColor });
+        leftPanel.Controls.Add(new Label { Dock = DockStyle.Top, Height = 8, BackColor = bg });
         leftPanel.Controls.Add(licenseLabel);
         leftPanel.Controls.Add(descLabel);
         leftPanel.Controls.Add(copyrightLabel);
         leftPanel.Controls.Add(versionLabel);
         leftPanel.Controls.Add(titleLabel);
         leftPanel.Controls.Add(logoPicture);
-        leftPanel.Controls.Add(new Label { Dock = DockStyle.Top, Height = 16, BackColor = BackColor });
+        leftPanel.Controls.Add(new Label { Dock = DockStyle.Top, Height = 16, BackColor = bg });
 
         // ── Vertical separator ────────────────────────────────────────
         var vertSeparator = new Panel
         {
             Dock = DockStyle.Left,
             Width = 1,
-            BackColor = Color.FromArgb(60, 60, 60),
+            BackColor = sepColor,
         };
 
         // ── Right panel (release notes) ───────────────────────────────
         var rightPanel = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = BackColor,
+            BackColor = bg,
             Padding = new Padding(12, 16, 12, 8),
         };
 
@@ -281,8 +296,8 @@ internal sealed class AboutForm : Form
             Dock = DockStyle.Top,
             Height = 180,
             Font = new Font("Consolas", 8.5f),
-            BackColor = Color.FromArgb(25, 25, 25),
-            ForeColor = Color.FromArgb(180, 180, 180),
+            BackColor = panelBg,
+            ForeColor = dimFg,
             BorderStyle = BorderStyle.None,
             DetectUrls = true,
         };
@@ -297,7 +312,7 @@ internal sealed class AboutForm : Form
         {
             Dock = DockStyle.Top,
             Height = 16,
-            BackColor = BackColor,
+            BackColor = bg,
         };
 
         // Release notes.
@@ -317,8 +332,8 @@ internal sealed class AboutForm : Form
             ScrollBars = RichTextBoxScrollBars.Both,
             Dock = DockStyle.Fill,
             Font = new Font("Consolas", 9f),
-            BackColor = Color.FromArgb(25, 25, 25),
-            ForeColor = Color.FromArgb(200, 200, 200),
+            BackColor = panelBg,
+            ForeColor = accentFg,
             BorderStyle = BorderStyle.None,
             DetectUrls = true,
         };
@@ -343,5 +358,27 @@ internal sealed class AboutForm : Form
         Controls.Add(vertSeparator);
         Controls.Add(leftPanel);
         Controls.Add(bottomPanel);
+    }
+
+    /// <summary>Blends <paramref name="from"/> towards <paramref name="to"/> by <paramref name="amount"/> (0..1).</summary>
+    private static Color Blend(Color from, Color to, float amount) =>
+        Color.FromArgb(
+            from.A,
+            Clamp((int)(from.R + (to.R - from.R) * amount)),
+            Clamp((int)(from.G + (to.G - from.G) * amount)),
+            Clamp((int)(from.B + (to.B - from.B) * amount)));
+
+    private static int Clamp(int v) => Math.Clamp(v, 0, 255);
+
+    /// <summary>Returns an accent / link colour appropriate for the theme luminance.</summary>
+    private static Color BlendAccent(ITheme theme)
+    {
+        float lum = (theme.EditorBackground.R * 0.299f
+                   + theme.EditorBackground.G * 0.587f
+                   + theme.EditorBackground.B * 0.114f) / 255f;
+        // Dark theme → blueish accent, Light theme → darker blue.
+        return lum < 0.5f
+            ? Color.FromArgb(86, 156, 214)
+            : Color.FromArgb(0, 102, 178);
     }
 }

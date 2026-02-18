@@ -27,6 +27,7 @@ public sealed class CustomHighlightManagerDialog : Form
     private readonly Button _deleteRuleBtn;
     private readonly Button _moveUpBtn;
     private readonly Button _moveDownBtn;
+    private readonly Button _exportBtn;
     private readonly Button _saveBtn;
 
     public CustomHighlightManagerDialog(CustomHighlightStore store, ITheme theme)
@@ -134,7 +135,10 @@ public sealed class CustomHighlightManagerDialog : Form
         profileBtnPanel.Controls.Add(_addProfileBtn);
         profileBtnPanel.Controls.Add(_deleteProfileBtn);
 
+        var nameSpacer = new Panel { Dock = DockStyle.Top, Height = 6 };
+
         leftPanel.Controls.Add(_profileList);
+        leftPanel.Controls.Add(nameSpacer);
         leftPanel.Controls.Add(_profileNameBox);
         leftPanel.Controls.Add(profileBtnPanel);
         leftPanel.Controls.Add(profileLabel);
@@ -228,9 +232,10 @@ public sealed class CustomHighlightManagerDialog : Form
         _rulesGrid.Columns.Add(foldableCol);
 
         _rulesGrid.CellFormatting += OnCellFormatting;
-        _rulesGrid.CellClick += OnCellClick;
+        _rulesGrid.CellMouseClick += OnCellMouseClick;
         _rulesGrid.CellEndEdit += OnCellEndEdit;
         _rulesGrid.KeyDown += OnGridKeyDown;
+        _rulesGrid.SelectionChanged += (_, _) => UpdateButtonStates();
         // Commit checkbox edits immediately so the Value property is always current.
         _rulesGrid.CurrentCellDirtyStateChanged += (_, _) =>
         {
@@ -283,8 +288,18 @@ public sealed class CustomHighlightManagerDialog : Form
         closeBtn.Width = 100;
         closeBtn.Click += (_, _) => Close();
 
+        var importBtn = MakeButton(Strings.CustomHighlightImport);
+        importBtn.Width = 100;
+        importBtn.Click += OnImport;
+
+        _exportBtn = MakeButton(Strings.CustomHighlightExport);
+        _exportBtn.Width = 100;
+        _exportBtn.Click += OnExport;
+
         bottomPanel.Controls.Add(closeBtn);
         bottomPanel.Controls.Add(_saveBtn);
+        bottomPanel.Controls.Add(importBtn);
+        bottomPanel.Controls.Add(_exportBtn);
 
         // ── Assemble ───────────────────────────────────────────────────
         Controls.Add(rightPanel);
@@ -292,6 +307,7 @@ public sealed class CustomHighlightManagerDialog : Form
         Controls.Add(bottomPanel);
 
         RefreshProfileList();
+        UpdateButtonStates();
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
@@ -403,6 +419,20 @@ public sealed class CustomHighlightManagerDialog : Form
         }
     }
 
+    private void UpdateButtonStates()
+    {
+        bool hasProfile = SelectedProfile is not null;
+        bool hasRule = hasProfile && _rulesGrid.CurrentRow is not null;
+
+        _deleteProfileBtn.Enabled = hasProfile;
+        _profileNameBox.Enabled = hasProfile;
+        _exportBtn.Enabled = hasProfile;
+        _addRuleBtn.Enabled = hasProfile;
+        _deleteRuleBtn.Enabled = hasRule;
+        _moveUpBtn.Enabled = hasRule;
+        _moveDownBtn.Enabled = hasRule;
+    }
+
     // ── Event handlers ──────────────────────────────────────────────
 
     private void OnProfileSelected(object? sender, EventArgs e)
@@ -410,6 +440,7 @@ public sealed class CustomHighlightManagerDialog : Form
         var profile = SelectedProfile;
         _profileNameBox.Text = profile?.Name ?? string.Empty;
         LoadRulesIntoGrid(profile);
+        UpdateButtonStates();
     }
 
     private void OnProfileNameChanged(object? sender, EventArgs e)
@@ -523,26 +554,49 @@ public sealed class CustomHighlightManagerDialog : Form
         }
     }
 
-    private void OnCellClick(object? sender, DataGridViewCellEventArgs e)
+    private void OnCellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
     {
         if (e.RowIndex < 0) return;
         string colName = _rulesGrid.Columns[e.ColumnIndex].Name;
-        if (colName is "Foreground" or "Background")
+        if (colName is not ("Foreground" or "Background")) return;
+
+        var cell = _rulesGrid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+
+        if (e.Button == MouseButtons.Left)
         {
-            string current = _rulesGrid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value?.ToString() ?? "";
-            Color initial = ParseColor(current);
-
-            using var dlg = new ColorDialog
+            PickColorForCell(cell);
+        }
+        else if (e.Button == MouseButtons.Right)
+        {
+            var ctx = new ContextMenuStrip { Renderer = new ThemedMenuRenderer(_theme) };
+            ctx.Items.Add(Strings.CustomHighlightPickColor, null, (_, _) => PickColorForCell(cell));
+            ctx.Items.Add(Strings.CustomHighlightClearColor, null, (_, _) =>
             {
-                FullOpen = true,
-                Color = initial != Color.Empty ? initial : Color.White,
-            };
-
-            if (dlg.ShowDialog(this) == DialogResult.OK)
-            {
-                _rulesGrid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value = FormatColor(dlg.Color);
+                cell.Value = string.Empty;
                 _rulesGrid.InvalidateRow(e.RowIndex);
-            }
+                SyncRulesFromGrid();
+            });
+            var cellRect = _rulesGrid.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
+            ctx.Show(_rulesGrid, cellRect.X + e.X, cellRect.Y + e.Y);
+        }
+    }
+
+    private void PickColorForCell(DataGridViewCell cell)
+    {
+        string current = cell.Value?.ToString() ?? "";
+        Color initial = ParseColor(current);
+
+        using var dlg = new ColorDialog
+        {
+            FullOpen = true,
+            Color = initial != Color.Empty ? initial : Color.White,
+        };
+
+        if (dlg.ShowDialog(this) == DialogResult.OK)
+        {
+            cell.Value = FormatColor(dlg.Color);
+            _rulesGrid.InvalidateRow(cell.RowIndex);
+            SyncRulesFromGrid();
         }
     }
 
@@ -564,6 +618,89 @@ public sealed class CustomHighlightManagerDialog : Form
             _rulesGrid.InvalidateRow(_rulesGrid.CurrentCell.RowIndex);
             SyncRulesFromGrid();
             e.Handled = true;
+        }
+    }
+
+    private void OnExport(object? sender, EventArgs e)
+    {
+        SyncRulesFromGrid();
+
+        var profile = SelectedProfile;
+        if (profile is null)
+        {
+            MessageBox.Show(this, Strings.CustomHighlightExportEmpty,
+                Strings.AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dlg = new SaveFileDialog
+        {
+            Title = Strings.CustomHighlightExport,
+            Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            DefaultExt = "json",
+            FileName = profile.Name + ".json",
+        };
+
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        try
+        {
+            string json = CustomHighlightStore.ExportToJson([profile]);
+            File.WriteAllText(dlg.FileName, json);
+            MessageBox.Show(this, Strings.CustomHighlightExportSuccess,
+                Strings.AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message,
+                Strings.AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void OnImport(object? sender, EventArgs e)
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Title = Strings.CustomHighlightImport,
+            Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            DefaultExt = "json",
+        };
+
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        try
+        {
+            string json = File.ReadAllText(dlg.FileName);
+            var imported = CustomHighlightStore.ImportFromJson(json);
+            if (imported is null || imported.Count == 0)
+            {
+                MessageBox.Show(this, Strings.CustomHighlightImportError,
+                    Strings.AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            SyncRulesFromGrid();
+
+            foreach (var profile in imported)
+            {
+                // If a profile with the same name exists, replace it.
+                int existing = _profiles.FindIndex(p =>
+                    string.Equals(p.Name, profile.Name, StringComparison.OrdinalIgnoreCase));
+                if (existing >= 0)
+                    _profiles[existing] = profile;
+                else
+                    _profiles.Add(profile);
+            }
+
+            RefreshProfileList();
+            MessageBox.Show(this,
+                string.Format(Strings.CustomHighlightImportSuccess, imported.Count),
+                Strings.AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message,
+                Strings.AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
