@@ -7,6 +7,7 @@
 - word wrap is now saved per tab, so each document remembers its own setting across restarts and crashes, with new documents defaulting to the last-used state.
 - open recent files menu now displays recent files in a cleaner two-column format.
 - added move up and move down buttons for reordering custom highlighting profiles.
+- fixed CJK (Chinese, Japanese, Korean) characters overlapping in the embedded terminal by correctly treating fullwidth characters as double-width cells.
 
 v.1.0.3.		2025-02-18
 --------------------------

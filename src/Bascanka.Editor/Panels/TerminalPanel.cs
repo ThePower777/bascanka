@@ -150,6 +150,9 @@ public partial class TerminalPanel : UserControl
     private int _savedCursorRow, _savedCursorCol;
     private int _scrollTop, _scrollBottom;
 
+    // Wide-character continuation sentinel (placed in the trailing cell).
+    private const char WideCharCont = '\uFFFF';
+
     // Scrollback
     private readonly List<char[]> _scrollbackChars = new();
     private readonly List<CellAttr[]> _scrollbackAttrs = new();
@@ -523,11 +526,71 @@ public partial class TerminalPanel : UserControl
 
     private void PutChar(char c)
     {
-        if (_cursorCol >= _cols) { _cursorCol = 0; LineFeed(); }
+        bool wide = IsFullWidth(c);
+
+        if (wide && _cursorCol >= _cols - 1)
+        {
+            // Wide char won't fit on the remainder of this line — blank
+            // the last cell (if any) and wrap to the next line.
+            if (_cursorCol < _cols)
+            {
+                int idx0 = _cursorRow * _cols + _cursorCol;
+                _chars[idx0] = ' '; _attrs[idx0] = _currentAttr;
+            }
+            _cursorCol = 0; LineFeed();
+        }
+        else if (_cursorCol >= _cols)
+        {
+            _cursorCol = 0; LineFeed();
+        }
+
         int idx = _cursorRow * _cols + _cursorCol;
+
+        // If we're overwriting the trailing half of a previous wide char,
+        // blank its leading half so it doesn't render as a partial glyph.
+        if (_chars[idx] == WideCharCont && _cursorCol > 0)
+            _chars[idx - 1] = ' ';
+
+        // If we're overwriting the leading half of a wide char, blank
+        // its trailing continuation cell.
+        if (_cursorCol + 1 < _cols && _chars[idx + 1] == WideCharCont)
+            _chars[idx + 1] = ' ';
+
         _chars[idx] = c;
         _attrs[idx] = _currentAttr;
         _cursorCol++;
+
+        if (wide && _cursorCol < _cols)
+        {
+            int idx2 = _cursorRow * _cols + _cursorCol;
+            // Same cleanup for the continuation cell.
+            if (_cursorCol + 1 < _cols && _chars[idx2 + 1] == WideCharCont)
+                _chars[idx2 + 1] = ' ';
+            _chars[idx2] = WideCharCont;
+            _attrs[idx2] = _currentAttr;
+            _cursorCol++;
+        }
+    }
+
+    /// <summary>
+    /// Returns true for characters that occupy two columns in a terminal
+    /// (CJK ideographs, Hangul syllables, fullwidth forms, etc.).
+    /// Based on Unicode East Asian Width categories W and F.
+    /// </summary>
+    private static bool IsFullWidth(char c)
+    {
+        if (c < 0x1100) return false;
+        return (c <= 0x115F) ||                          // Hangul Jamo
+               (c >= 0x2E80 && c <= 0x303E) ||           // CJK Radicals, Kangxi, Symbols & Punctuation
+               (c >= 0x3041 && c <= 0x33BF) ||           // Hiragana, Katakana, Bopomofo, Hangul Compat Jamo, Kanbun
+               (c >= 0x3400 && c <= 0x4DBF) ||           // CJK Extension A
+               (c >= 0x4E00 && c <= 0xA4CF) ||           // CJK Unified Ideographs, Yi Syllables/Radicals
+               (c >= 0xA960 && c <= 0xA97F) ||           // Hangul Jamo Extended-A
+               (c >= 0xAC00 && c <= 0xD7AF) ||           // Hangul Syllables
+               (c >= 0xF900 && c <= 0xFAFF) ||           // CJK Compatibility Ideographs
+               (c >= 0xFE10 && c <= 0xFE6F) ||           // CJK Compatibility Forms, Small Form Variants
+               (c >= 0xFF01 && c <= 0xFF60) ||           // Fullwidth Forms
+               (c >= 0xFFE0 && c <= 0xFFE6);            // Fullwidth Signs
     }
 
     private void LineFeed()
@@ -885,12 +948,22 @@ public partial class TerminalPanel : UserControl
             for (int col = 0; col < colsInRow; col++)
             {
                 char ch = srcC[off + col];
-                if (ch == ' ' || ch == '\0') continue;
+                if (ch == ' ' || ch == '\0' || ch == WideCharCont) continue;
                 var attr = srcA[off + col];
                 Color fg = Palette[attr.Bold && attr.Fg < 8 ? attr.Fg + 8 : attr.Fg];
                 if (attr.Reverse) fg = Palette[attr.Bg];
-                TextRenderer.DrawText(g, ch.ToString(), _termFont,
-                    new Point(pad + col * _cellW, y), fg, flags);
+
+                if (IsFullWidth(ch))
+                {
+                    // Draw the wide glyph into a 2-cell-wide rectangle.
+                    var rect = new Rectangle(pad + col * _cellW, y, _cellW * 2, _cellH);
+                    TextRenderer.DrawText(g, ch.ToString(), _termFont, rect, fg, flags);
+                }
+                else
+                {
+                    TextRenderer.DrawText(g, ch.ToString(), _termFont,
+                        new Point(pad + col * _cellW, y), fg, flags);
+                }
             }
         }
 
