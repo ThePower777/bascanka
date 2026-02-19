@@ -186,8 +186,5 @@ Josip Habjan (habjan@gmail.com)
 
 ## License
 
-<<<<<<< HEAD
 GNU General Public License Version 3
-=======
-GNU General Public License Version 3
->>>>>>> c908f1ef480f0f7c60339a1d872661a625a0be4f
+
