@@ -46,5 +46,5 @@
     <ProjectReference Include="..\Bascanka.Core\Bascanka.Core.csproj" />
     <ProjectReference Include="..\Bascanka.Editor\Bascanka.Editor.csproj" />
     <ProjectReference Include="..\Bascanka.Plugins.Api\Bascanka.Plugins.Api.csproj" />
-  </ItemGroup>  
+  </ItemGroup>
 </Project>
